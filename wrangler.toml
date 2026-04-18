@@ -1,0 +1,8 @@
+name = "telegram-tempmail"
+main = "src/main.js"
+compatibility_date = "2026-04-18"
+workers_dev = true
+
+[vars]
+DOMAIN = "dahus.my.id"
+ALLOWED_USER_ID = "6083649512"
