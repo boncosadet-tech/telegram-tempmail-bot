@@ -1,0 +1,7 @@
+#!/usr/bin/env node
+import { runVerify } from "../src/cli/verify.js";
+
+runVerify().catch((error) => {
+  console.error(`[verify] failed: ${error.message}`);
+  process.exitCode = 1;
+});

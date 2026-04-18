@@ -153,4 +153,19 @@ export class CloudflareClient {
     }
     return res.text();
   }
+
+  async deleteKVValue(accountId, namespaceId, keyName) {
+    const res = await fetch(
+      `${this.baseUrl}/accounts/${accountId}/storage/kv/namespaces/${namespaceId}/values/${encodeURIComponent(keyName)}`,
+      {
+        method: "DELETE",
+        headers: this.headers()
+      }
+    );
+    if (res.status === 404) return;
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Cloudflare KV DELETE failed (${res.status}): ${text}`);
+    }
+  }
 }

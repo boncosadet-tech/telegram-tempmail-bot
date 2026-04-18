@@ -1,10 +1,46 @@
 {
   "name": "telegram-tempmail-bot",
-  "private": true,
-  "version": "1.0.0",
+  "description": "Interactive npm app to provision a private Telegram temp-mail bot on Cloudflare Email Routing and Workers.",
+  "version": "1.0.1",
   "type": "module",
+  "bin": {
+    "telegram-tempmail-bot": "./bin/telegram-tempmail-bot",
+    "telegram-tempmail-admin": "./bin/telegram-tempmail-admin",
+    "telegram-tempmail-setup": "./bin/telegram-tempmail-setup",
+    "telegram-tempmail-verify": "./bin/telegram-tempmail-verify"
+  },
+  "files": [
+    "README.md",
+    "bin",
+    "wrangler.toml",
+    "src"
+  ],
+  "keywords": [
+    "cloudflare",
+    "email-routing",
+    "telegram",
+    "tempmail",
+    "worker",
+    "cli"
+  ],
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shizukudes/telegram-tempmail-bot.git"
+  },
+  "bugs": {
+    "url": "https://github.com/shizukudes/telegram-tempmail-bot/issues"
+  },
+  "homepage": "https://github.com/shizukudes/telegram-tempmail-bot",
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
-    "check": "node --check src/main.js && node --check src/cli/setup.js && node --check src/cli/verify.js",
+    "check": "node --check src/main.js && node --check src/cli/setup.js && node --check src/cli/verify.js && node --check src/cli/admin.js && node --check src/cli/app.js && node --check bin/telegram-tempmail-bot && node --check bin/telegram-tempmail-admin && node --check bin/telegram-tempmail-setup && node --check bin/telegram-tempmail-verify",
+    "start": "node src/cli/app.js",
     "setup": "node src/cli/setup.js",
     "verify": "node src/cli/verify.js",
     "test": "node --test",

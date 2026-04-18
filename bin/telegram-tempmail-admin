@@ -1,0 +1,7 @@
+#!/usr/bin/env node
+import { runAdmin } from "../src/cli/admin.js";
+
+runAdmin().catch((error) => {
+  console.error(`[admin] failed: ${error.message}`);
+  process.exitCode = 1;
+});

@@ -1,0 +1,7 @@
+#!/usr/bin/env node
+import { runSetup } from "../src/cli/setup.js";
+
+runSetup().catch((error) => {
+  console.error(`[setup] failed: ${error.message}`);
+  process.exitCode = 1;
+});

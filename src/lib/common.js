@@ -1,6 +1,8 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import readline from "node:readline/promises";
+import { stdin as input, stdout as output } from "node:process";
 
 export function parseArgs(argv) {
   const out = {};
@@ -86,4 +88,34 @@ export function writeJsonFile(filePath, data) {
 
 export function readTextFile(filePath) {
   return fs.readFileSync(filePath, "utf8");
+}
+
+export function readJsonFile(filePath, fallback = null) {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch {
+    return fallback;
+  }
+}
+
+export async function withPrompts(fn) {
+  const rl = readline.createInterface({ input, output });
+  try {
+    return await fn(rl);
+  } finally {
+    rl.close();
+  }
+}
+
+export async function promptInput(rl, label, fallback = "") {
+  const suffix = fallback ? ` [${fallback}]` : "";
+  const answer = (await rl.question(`${label}${suffix}: `)).trim();
+  return answer || fallback;
+}
+
+export async function promptConfirm(rl, label, defaultValue = false) {
+  const fallback = defaultValue ? "Y/n" : "y/N";
+  const answer = (await rl.question(`${label} (${fallback}): `)).trim().toLowerCase();
+  if (!answer) return defaultValue;
+  return ["y", "yes"].includes(answer);
 }
