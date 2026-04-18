@@ -4,7 +4,10 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "check": "node --check src/main.js",
+    "check": "node --check src/main.js && node --check src/cli/setup.js && node --check src/cli/verify.js",
+    "setup": "node src/cli/setup.js",
+    "verify": "node src/cli/verify.js",
+    "test": "node --test",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "tail": "wrangler tail"

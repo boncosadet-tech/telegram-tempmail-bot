@@ -1,42 +1,55 @@
 # telegram-tempmail-bot
 
-Cloudflare Worker untuk temp mail pribadi yang terintegrasi Telegram bot.
+Private temp-mail bot on Cloudflare Email Routing + Cloudflare Workers + Telegram.
 
-## Fitur
-- Handler `email` untuk menerima email dari Cloudflare Email Routing.
-- Handler `fetch` untuk menerima Telegram webhook.
-- Command bot: `/start`, `/help`, `/new`, `/whoami`.
-- Catch-all domain bisa diarahkan ke Worker agar alamat random `*@domain` diterima.
+## What this repo does
+- Auto setup Cloudflare Worker, KV, Email Routing catch-all, and Telegram webhook.
+- Uses one catch-all worker route (`*@domain`) and virtual aliases from `/new`.
+- Owner is claimed once via `/start claim` in private chat.
 
-## Struktur
-- `src/main.js`: Worker source code.
-- `wrangler.toml`: konfigurasi Worker dan vars non-rahasia.
+## Required inputs
+- `domain`
+- `cf-email`
+- `cf-global-key`
+- `telegram-bot-token`
 
-## Secrets yang wajib diset
-- `BOT_TOKEN`
-- `WEBHOOK_SECRET`
+Cloudflare Global API Key must be paired with Cloudflare account email.
 
-Set via Wrangler:
-
+## One-command setup
 ```bash
-npx wrangler secret put BOT_TOKEN
-npx wrangler secret put WEBHOOK_SECRET
+npm run setup -- \
+  --domain yourdomain.com \
+  --cf-email your-cloudflare-email@example.com \
+  --cf-global-key <CLOUDFLARE_GLOBAL_API_KEY> \
+  --telegram-bot-token <TELEGRAM_BOT_TOKEN>
 ```
 
-## Deploy
+The command prints a claim link:
+`https://t.me/<bot_username>?start=claim`
 
+Open it, then the owner is claimed automatically.
+
+## Verify setup
 ```bash
-npx wrangler deploy
+npm run verify -- \
+  --domain yourdomain.com \
+  --cf-email your-cloudflare-email@example.com \
+  --cf-global-key <CLOUDFLARE_GLOBAL_API_KEY> \
+  --telegram-bot-token <TELEGRAM_BOT_TOKEN>
 ```
 
-## Set Telegram Webhook
-Ganti `<workers-subdomain>` dan `<secret>`:
+You can omit `--telegram-bot-token` in verify. Telegram webhook check will be marked as pending.
 
-```bash
-curl -X POST "https://api.telegram.org/bot<bot_token>/setWebhook" \
-  -H "Content-Type: application/json" \
-  -d '{"url":"https://telegram-tempmail.<workers-subdomain>.workers.dev/tg/<secret>","secret_token":"<secret>","allowed_updates":["message"]}'
-```
+## Bot commands
+- `/start claim` claim owner on first use
+- `/start` show status
+- `/new` generate random alias
+- `/status` show runtime status
+- `/whoami` show telegram ids
+- `/help` show command list
 
-## Catatan
-Jangan commit token, API key, atau webhook secret ke repo.
+## Notes
+- Setup only manages catch-all email rule. Literal email rules are preserved.
+- If existing catch-all points to another worker, setup fails unless `--force`.
+- Cloudflare Email Routing max message size is 25 MiB.
+- Do not commit API keys or bot tokens.
