@@ -87,3 +87,15 @@ The interactive app also exposes both actions from the main menu.
 - Cloudflare Email Routing max message size is 25 MiB.
 - Re-running setup rotates the webhook secret and updates the webhook URL.
 - Do not commit API keys or bot tokens.
+
+## GitHub publish workflow
+This repo includes [publish-npm.yml](./.github/workflows/publish-npm.yml) to publish the package from GitHub Actions.
+
+Requirements:
+- add repo secret `NPM_TOKEN`
+- use an npm token that can publish public packages
+
+Triggers:
+- push tag like `v1.0.3`
+- GitHub release published
+- manual `workflow_dispatch`
