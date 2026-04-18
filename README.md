@@ -99,3 +99,8 @@ Triggers:
 - push tag like `v1.0.3`
 - GitHub release published
 - manual `workflow_dispatch`
+
+## GitHub CI workflow
+This repo also includes [ci.yml](./.github/workflows/ci.yml) for development checks on:
+- push to `master`
+- pull requests targeting `master`
