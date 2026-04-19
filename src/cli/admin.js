@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { CloudflareClient } from "../lib/cloudflare.js";
 import { TelegramClient } from "../lib/telegram.js";
 import {
+  defaultWorkerNameForDomain,
   parseArgs,
   promptInput,
   readInput,
@@ -12,7 +13,6 @@ import {
   sanitizeWorkerName,
   withPrompts
 } from "../lib/common.js";
-import { defaultWorkerNameForDomain } from "../lib/common.js";
 import { resetOwner, rotateWebhookSecret } from "../lib/service.js";
 
 async function collectAdminInputs(args, cwd) {

@@ -129,3 +129,37 @@ test("email handler forwards summary to claimed owner chat", async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+test("email handler still sends when waitUntil is unavailable", async () => {
+  const env = createEnv({
+    userId: "6083649512",
+    chatId: "6083649512",
+    claimedAt: "2026-04-19T00:00:00.000Z",
+    domain: "example.com"
+  });
+  const sentMessages = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, init) => {
+    sentMessages.push(JSON.parse(init.body));
+    return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  try {
+    await worker.email(
+      {
+        from: "noreply@example.net",
+        to: "tmp-noctx@example.com",
+        headers: new Headers({ subject: "Login code" }),
+        raw: createRawEmail("Subject: Login code\nContent-Type: text/plain\n\nUse 654321 to continue.")
+      },
+      env,
+      {}
+    );
+
+    assert.equal(sentMessages.length, 1);
+    assert.match(sentMessages[0].text, /To: tmp-noctx@example.com/);
+    assert.match(sentMessages[0].text, /Possible code: 654321/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

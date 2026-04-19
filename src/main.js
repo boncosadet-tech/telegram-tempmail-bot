@@ -136,6 +136,14 @@ async function setOwner(env, owner) {
   await env.STATE_KV.put(OWNER_KEY, JSON.stringify(owner));
 }
 
+async function waitUntilOrRun(ctx, promise) {
+  if (typeof ctx?.waitUntil === "function") {
+    ctx.waitUntil(promise);
+    return;
+  }
+  await promise;
+}
+
 function isOwnerMessage(msg, owner) {
   if (!msg || !owner) return false;
   const fromId = msg.from?.id != null ? String(msg.from.id) : "";
@@ -286,6 +294,6 @@ export default {
       preview || "(no preview)"
     ].join("\n");
 
-    ctx.waitUntil(sendTelegram(env, owner.chatId, text));
+    await waitUntilOrRun(ctx, sendTelegram(env, owner.chatId, text));
   }
 };
