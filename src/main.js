@@ -590,14 +590,36 @@ function renderLoginPage(domain) {
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>TempMail Login</title>
   <style>
-    body { font-family: system-ui, sans-serif; background: #0b1020; color: #eef2ff; margin: 0; }
-    .card { max-width: 680px; margin: 8vh auto; background: #121933; border: 1px solid #243055; border-radius: 16px; padding: 24px; }
-    code { background: #0b1020; padding: 2px 6px; border-radius: 6px; }
-    a { color: #8ec5ff; }
+    :root { color-scheme: light; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(255, 214, 69, .55), transparent 34rem),
+        linear-gradient(135deg, #fff8d7 0%, #ffe182 42%, #fbbf24 100%);
+      color: #171717;
+      margin: 0;
+      min-height: 100vh;
+      padding: 24px;
+    }
+    .card {
+      max-width: 720px;
+      margin: 8vh auto;
+      background: rgba(255,255,255,.92);
+      border: 3px solid #171717;
+      border-radius: 28px;
+      padding: 30px;
+      box-shadow: 10px 10px 0 #171717;
+    }
+    .badge { display: inline-flex; align-items: center; gap: 8px; background: #171717; color: #ffd84d; padding: 8px 12px; border-radius: 999px; font-weight: 800; }
+    h1 { font-size: clamp(32px, 6vw, 54px); line-height: .95; margin: 18px 0 12px; letter-spacing: -2px; }
+    p { color: #3f3f46; font-size: 17px; line-height: 1.6; }
+    code { background: #fff3bf; border: 2px solid #171717; padding: 3px 8px; border-radius: 8px; font-weight: 800; }
   </style>
 </head>
 <body>
   <div class="card">
+    <div class="badge">⚡ Owner only</div>
     <h1>Private TempMail Dashboard</h1>
     <p>Domain: <strong>${escapeHtml(domain)}</strong></p>
     <p>Dashboard ini private. Untuk login, buka bot Telegram kamu lalu kirim <code>/web</code>.</p>
@@ -615,40 +637,89 @@ function renderAppPage(domain) {
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>TempMail Dashboard</title>
   <style>
-    :root { color-scheme: dark; }
-    body { margin: 0; font-family: system-ui, sans-serif; background: #0b1020; color: #eef2ff; }
-    header { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid #243055; }
-    .wrap { display: grid; grid-template-columns: 360px 1fr; min-height: calc(100vh - 65px); }
-    aside, main { padding: 18px; }
-    aside { border-right: 1px solid #243055; background: #10162e; }
-    h1, h2, h3 { margin: 0 0 12px; }
-    .muted { color: #94a3b8; font-size: 14px; }
-    .stack { display: grid; gap: 12px; }
-    .card { background: #121933; border: 1px solid #243055; border-radius: 14px; padding: 14px; }
-    input, select, button, textarea { width: 100%; box-sizing: border-box; background: #0b1020; color: #eef2ff; border: 1px solid #31406f; border-radius: 10px; padding: 10px; }
-    button { cursor: pointer; }
-    button.primary { background: #2563eb; border-color: #2563eb; }
-    .row { display: flex; gap: 8px; }
+    :root {
+      color-scheme: light;
+      --ink: #171717;
+      --muted: #6b5f3f;
+      --paper: #fffef7;
+      --cream: #fff7d1;
+      --yellow: #ffd84d;
+      --yellow-2: #ffbd1f;
+      --orange: #ff8a00;
+      --line: #171717;
+      --soft-line: rgba(23,23,23,.14);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at 8% 4%, rgba(255, 235, 120, .8), transparent 26rem),
+        radial-gradient(circle at 96% 8%, rgba(255, 138, 0, .22), transparent 30rem),
+        linear-gradient(135deg, #fffdf2 0%, #fff1a8 48%, #ffc83d 100%);
+      color: var(--ink);
+      min-height: 100vh;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 18px;
+      padding: 18px 22px;
+      margin: 18px;
+      background: linear-gradient(135deg, #fffef7, #ffe17a);
+      border: 3px solid var(--line);
+      border-radius: 28px;
+      box-shadow: 8px 8px 0 var(--line);
+    }
+    .brand { display: flex; align-items: center; gap: 14px; }
+    .brand-mark { width: 52px; height: 52px; display: grid; place-items: center; border: 3px solid var(--line); border-radius: 18px; background: var(--ink); color: var(--yellow); font-size: 26px; box-shadow: 4px 4px 0 var(--yellow-2); }
+    .title-eyebrow { font-size: 13px; font-weight: 900; text-transform: uppercase; letter-spacing: .12em; color: #8a5a00; }
+    h1, h2, h3 { margin: 0 0 12px; letter-spacing: -.03em; }
+    h1 { margin: 0; font-size: clamp(26px, 3vw, 38px); line-height: .95; }
+    .domain-chip { display: inline-flex; margin-top: 8px; background: #171717; color: #fff3bf; border-radius: 999px; padding: 5px 10px; font-weight: 800; font-size: 13px; }
+    .wrap { display: grid; grid-template-columns: minmax(320px, 390px) 1fr; gap: 18px; padding: 0 18px 18px; min-height: calc(100vh - 122px); }
+    aside, main { min-width: 0; }
+    .muted { color: var(--muted); font-size: 14px; }
+    .stack { display: grid; gap: 14px; }
+    .card { background: rgba(255,255,255,.93); border: 3px solid var(--line); border-radius: 24px; padding: 16px; box-shadow: 6px 6px 0 rgba(23,23,23,.9); }
+    input, select, button, textarea {
+      width: 100%;
+      background: var(--paper);
+      color: var(--ink);
+      border: 2px solid var(--line);
+      border-radius: 16px;
+      padding: 12px 13px;
+      font: inherit;
+    }
+    button { cursor: pointer; font-weight: 900; transition: transform .12s ease, box-shadow .12s ease, background .12s ease; }
+    button:hover { transform: translate(-1px, -1px); box-shadow: 4px 4px 0 var(--line); }
+    button.primary { background: linear-gradient(135deg, var(--yellow), var(--yellow-2)); border-color: var(--line); }
+    .row { display: flex; gap: 10px; }
     .row > * { flex: 1; }
-    .messages { display: grid; gap: 10px; max-height: 70vh; overflow: auto; }
-    .message { border: 1px solid #243055; border-radius: 12px; padding: 12px; background: #121933; cursor: pointer; }
-    .message.active { border-color: #60a5fa; }
-    .pill { display: inline-block; border-radius: 999px; padding: 2px 8px; background: #1e3a8a; font-size: 12px; }
-    pre { white-space: pre-wrap; word-break: break-word; background: #0b1020; padding: 12px; border-radius: 12px; border: 1px solid #243055; }
-    .email-surface { background: #f8fafc; color: #0f172a; border: 1px solid #cbd5e1; border-radius: 12px; padding: 18px; line-height: 1.6; }
+    .messages { display: grid; gap: 12px; max-height: 66vh; overflow: auto; padding-right: 3px; }
+    .message { border: 2px solid var(--line); border-radius: 18px; padding: 13px; background: #fffdf4; cursor: pointer; text-align: left; box-shadow: 3px 3px 0 rgba(23,23,23,.55); }
+    .message.active { background: #fff1a8; box-shadow: 5px 5px 0 var(--line); }
+    .pill { display: inline-block; border-radius: 999px; padding: 3px 9px; background: var(--ink); color: var(--yellow); font-weight: 900; font-size: 12px; }
+    pre { white-space: pre-wrap; word-break: break-word; background: #fffdf4; padding: 12px; border-radius: 18px; border: 2px solid var(--soft-line); color: #3f3f46; }
+    .email-surface { background: #ffffff; color: #202124; border: 2px solid var(--line); border-radius: 20px; padding: 20px; line-height: 1.65; box-shadow: inset 0 0 0 1px rgba(23,23,23,.05); }
     .email-surface p { margin: 0 0 14px; }
     .email-surface ul { margin: 0 0 14px 18px; padding: 0; }
     .email-surface li { margin-bottom: 6px; }
-    .email-surface a { color: #2563eb; text-decoration: underline; }
-    .email-empty { color: #64748b; font-style: italic; }
-    @media (max-width: 920px) { .wrap { grid-template-columns: 1fr; } aside { border-right: 0; border-bottom: 1px solid #243055; } }
+    .email-surface a { color: #1a73e8; text-decoration: underline; font-weight: 700; }
+    .email-empty { color: #71717a; font-style: italic; }
+    @media (max-width: 920px) { header { margin: 12px; } .wrap { grid-template-columns: 1fr; padding: 0 12px 12px; } .row { flex-wrap: wrap; } }
   </style>
 </head>
 <body>
   <header>
-    <div>
-      <h1>TempMail Dashboard</h1>
-      <div class="muted">${escapeHtml(domain)}</div>
+    <div class="brand">
+      <div class="brand-mark">✉</div>
+      <div>
+        <div class="title-eyebrow">private tempmail</div>
+        <h1>Dashboard</h1>
+        <div class="domain-chip">${escapeHtml(domain)}</div>
+      </div>
     </div>
     <div class="row" style="width: 240px;">
       <button id="refreshBtn">Refresh</button>
