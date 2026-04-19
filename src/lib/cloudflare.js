@@ -57,6 +57,11 @@ export class CloudflareClient {
     return res.result || [];
   }
 
+  async listD1Databases(accountId) {
+    const res = await this.requestJson(`/accounts/${accountId}/d1/database?page=1&per_page=100`);
+    return res.result || [];
+  }
+
   async findOrCreateKVNamespace(accountId, title) {
     const namespaces = await this.listKVNamespaces(accountId);
     const existing = namespaces.find((ns) => ns.title === title);
@@ -68,14 +73,37 @@ export class CloudflareClient {
     return created.result;
   }
 
-  async uploadWorkerScript(accountId, scriptName, sourceCode, domain, kvNamespaceId, compatibilityDate) {
+  async findOrCreateD1Database(accountId, name) {
+    const databases = await this.listD1Databases(accountId);
+    const existing = databases.find((db) => db.name === name);
+    if (existing) return existing;
+    const created = await this.requestJson(`/accounts/${accountId}/d1/database`, {
+      method: "POST",
+      body: { name }
+    });
+    return created.result;
+  }
+
+  async queryD1(accountId, databaseId, sql, params = []) {
+    const res = await this.requestJson(`/accounts/${accountId}/d1/database/${databaseId}/query`, {
+      method: "POST",
+      body: { sql, params }
+    });
+    return res.result || [];
+  }
+
+  async uploadWorkerScript(accountId, scriptName, sourceCode, domain, kvNamespaceId, compatibilityDate, d1DatabaseId = "") {
+    const bindings = [
+      { type: "plain_text", name: "DOMAIN", text: domain },
+      { type: "kv_namespace", name: "STATE_KV", namespace_id: kvNamespaceId }
+    ];
+    if (d1DatabaseId) {
+      bindings.push({ type: "d1", name: "MAIL_DB", database_id: d1DatabaseId });
+    }
     const metadata = {
       main_module: "main.js",
       compatibility_date: compatibilityDate,
-      bindings: [
-        { type: "plain_text", name: "DOMAIN", text: domain },
-        { type: "kv_namespace", name: "STATE_KV", namespace_id: kvNamespaceId }
-      ]
+      bindings
     };
     const form = new FormData();
     form.append("metadata", JSON.stringify(metadata));

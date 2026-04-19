@@ -10,6 +10,34 @@ import {
 } from "./common.js";
 
 export const OWNER_KEY = "owner";
+const D1_BINDING_NAME = "MAIL_DB";
+const D1_DB_PREFIX = "telegram-tempmail";
+const D1_SCHEMA_STATEMENTS = [
+  `CREATE TABLE IF NOT EXISTS messages (
+    id TEXT PRIMARY KEY,
+    alias_local TEXT NOT NULL,
+    alias_full TEXT NOT NULL,
+    sender TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    preview_text TEXT NOT NULL,
+    otp_code TEXT NOT NULL DEFAULT '-',
+    is_otp INTEGER NOT NULL DEFAULT 0,
+    size_kb INTEGER NOT NULL DEFAULT 0,
+    raw_kind TEXT NOT NULL DEFAULT 'unknown',
+    received_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+  )`,
+  "CREATE INDEX IF NOT EXISTS idx_messages_received_at ON messages (received_at DESC)",
+  "CREATE INDEX IF NOT EXISTS idx_messages_alias_local ON messages (alias_local, received_at DESC)",
+  "CREATE INDEX IF NOT EXISTS idx_messages_expires_at ON messages (expires_at)",
+  `CREATE TABLE IF NOT EXISTS aliases (
+    alias_local TEXT PRIMARY KEY,
+    source TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    last_seen_at INTEGER NOT NULL,
+    is_pinned INTEGER NOT NULL DEFAULT 0
+  )`
+];
 
 export function resolveScriptName(domain, scriptNameInput = "") {
   return scriptNameInput
@@ -30,6 +58,12 @@ export function statePathFor(cwd) {
 
 export function readSavedState(cwd) {
   return readJsonFile(statePathFor(cwd), {});
+}
+
+async function applyD1Migrations(cf, accountId, databaseId) {
+  for (const statement of D1_SCHEMA_STATEMENTS) {
+    await cf.queryD1(accountId, databaseId, statement);
+  }
 }
 
 export async function performSetup({
@@ -62,10 +96,13 @@ export async function performSetup({
 
   onProgress("ensuring KV namespace");
   const kvNamespace = await cf.findOrCreateKVNamespace(accountId, kvTitle);
+  onProgress("ensuring D1 database");
+  const d1Database = await cf.findOrCreateD1Database(accountId, sanitizeWorkerName(`${D1_DB_PREFIX}-${domain}`));
 
   const accountSubdomain = await cf.getAccountWorkersSubdomain(accountId);
   const workerUrlBase = `https://${scriptName}.${accountSubdomain}.workers.dev`;
   const webhookUrl = `${workerUrlBase}/tg/${webhookSecret}`;
+  const dashboardUrl = `${workerUrlBase}/app`;
 
   if (dryRun) {
     return {
@@ -75,7 +112,9 @@ export async function performSetup({
       accountId,
       zoneId: zone.id,
       kvNamespaceId: kvNamespace.id,
+      d1DatabaseId: d1Database.uuid || d1Database.id,
       workerUrlBase,
+      dashboardUrl,
       webhookUrl,
       claimLink: `https://t.me/${me.username}?start=${claimToken}`
     };
@@ -84,7 +123,18 @@ export async function performSetup({
   const workerSource = readTextFile(path.resolve(cwd, "src/main.js"));
 
   onProgress(`uploading worker script ${scriptName}`);
-  await cf.uploadWorkerScript(accountId, scriptName, workerSource, domain, kvNamespace.id, "2026-04-18");
+  await cf.uploadWorkerScript(
+    accountId,
+    scriptName,
+    workerSource,
+    domain,
+    kvNamespace.id,
+    "2026-04-18",
+    d1Database.uuid || d1Database.id
+  );
+
+  onProgress("applying D1 schema");
+  await applyD1Migrations(cf, accountId, d1Database.uuid || d1Database.id);
 
   onProgress("setting worker secrets");
   await cf.setWorkerSecret(accountId, scriptName, "BOT_TOKEN", telegramBotToken);
@@ -119,8 +169,10 @@ export async function performSetup({
     scriptName,
     accountSubdomain,
     workerUrlBase,
+    dashboardUrl,
     webhookUrlPrefix: `${workerUrlBase}/tg/`,
     kvNamespaceId: kvNamespace.id,
+    d1DatabaseId: d1Database.uuid || d1Database.id,
     botUsername: me.username,
     claimToken
   };
@@ -133,8 +185,10 @@ export async function performSetup({
     scriptName,
     accountSubdomain,
     workerUrlBase,
+    dashboardUrl,
     webhookUrl,
     kvNamespaceId: kvNamespace.id,
+    d1DatabaseId: d1Database.uuid || d1Database.id,
     claimLink: `https://t.me/${me.username}?start=${claimToken}`,
     statePath
   };
@@ -169,6 +223,7 @@ export async function performVerify({
     const bindings = workerSettings.bindings || [];
     const domainBinding = bindings.find((b) => b.type === "plain_text" && b.name === "DOMAIN");
     kvBinding = bindings.find((b) => b.type === "kv_namespace" && b.name === "STATE_KV");
+    const d1Binding = bindings.find((b) => b.type === "d1" && b.name === D1_BINDING_NAME);
     if (!domainBinding || domainBinding.text !== domain) {
       failures.push("DOMAIN binding is missing or mismatched");
     } else {
@@ -178,6 +233,17 @@ export async function performVerify({
       failures.push("STATE_KV binding is missing");
     } else {
       onStatus("binding STATE_KV", "ok", kvBinding.namespace_id);
+    }
+    if (!d1Binding || !(d1Binding.database_id || d1Binding.id)) {
+      failures.push("MAIL_DB binding is missing");
+    } else {
+      onStatus("binding MAIL_DB", "ok", d1Binding.database_id || d1Binding.id);
+      try {
+        await cf.queryD1(accountId, d1Binding.database_id || d1Binding.id, "SELECT 1 AS ok");
+        onStatus("d1-query", "ok", "schema reachable");
+      } catch (error) {
+        failures.push(`D1 query failed: ${error.message}`);
+      }
     }
   }
 

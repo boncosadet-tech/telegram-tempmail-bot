@@ -15,6 +15,10 @@ class MockKV {
   async put(key, value) {
     this.store.set(key, value);
   }
+
+  async delete(key) {
+    this.store.delete(key);
+  }
 }
 
 function createEnv(owner = null) {
@@ -90,6 +94,44 @@ test("telegram start claim stores owner in KV and acknowledges claim", async () 
     assert.equal(owner.chatId, "6083649512");
     assert.equal(sentMessages.length, 1);
     assert.match(sentMessages[0].text, /Owner claimed successfully/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("web command issues owner-only dashboard login link", async () => {
+  const env = createEnv({
+    userId: "6083649512",
+    chatId: "6083649512",
+    claimedAt: "2026-04-19T00:00:00.000Z",
+    domain: "example.com"
+  });
+  const sentMessages = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, init) => {
+    sentMessages.push(JSON.parse(init.body));
+    return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  try {
+    const response = await worker.fetch(
+      new Request("https://telegram-tempmail.example.workers.dev/tg/secret-token", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "X-Telegram-Bot-Api-Secret-Token": "secret-token"
+        },
+        body: JSON.stringify(createTelegramUpdate("/web", { userId: 6083649512, chatId: 6083649512 }))
+      }),
+      env
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(sentMessages.length, 1);
+    assert.match(sentMessages[0].text, /Dashboard login link:/);
+    assert.match(sentMessages[0].text, /https:\/\/telegram-tempmail\.example\.workers\.dev\/auth\/telegram\?token=/);
+    const loginKeys = Array.from(env.STATE_KV.store.keys()).filter((key) => key.startsWith("login:"));
+    assert.equal(loginKeys.length, 1);
   } finally {
     globalThis.fetch = originalFetch;
   }

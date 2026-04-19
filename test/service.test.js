@@ -19,6 +19,7 @@ function createCloudflareMock() {
     webhookSecretWrites: [],
     botTokenWrites: [],
     workerUploads: [],
+    d1Queries: [],
     catchAllTarget: "",
     enabledDns: 0,
     deletedKeys: []
@@ -30,6 +31,9 @@ function createCloudflareMock() {
     },
     async findOrCreateKVNamespace() {
       return { id: "kv-1", title: "telegram-tempmail:test" };
+    },
+    async findOrCreateD1Database() {
+      return { uuid: "d1-1", name: "telegram-tempmail-example.com" };
     },
     async getAccountWorkersSubdomain() {
       return "demoacct";
@@ -57,12 +61,17 @@ function createCloudflareMock() {
       return {
         bindings: [
           { type: "plain_text", name: "DOMAIN", text: "example.com" },
-          { type: "kv_namespace", name: "STATE_KV", namespace_id: "kv-1" }
+          { type: "kv_namespace", name: "STATE_KV", namespace_id: "kv-1" },
+          { type: "d1", name: "MAIL_DB", database_id: "d1-1" }
         ]
       };
     },
     async getEmailRouting() {
       return { enabled: true, status: "ready" };
+    },
+    async queryD1(_accountId, _databaseId, sql) {
+      state.d1Queries.push(sql);
+      return [{ success: true, results: [{ ok: 1 }] }];
     },
     async getKVValue() {
       return state.owner;
@@ -108,10 +117,12 @@ test("performSetup writes state and configures catch-all/webhook", async () => {
   assert.equal(result.scriptName, "telegram-tempmail-example-com");
   assert.equal(cf.state.catchAllTarget, "telegram-tempmail-example-com");
   assert.equal(cf.state.enabledDns, 1);
+  assert.ok(cf.state.d1Queries.length >= 1);
   assert.equal(tg.state.webhooks.length, 1);
   assert.match(result.claimLink, /https:\/\/t\.me\/demo_bot\?start=claim/);
   const saved = JSON.parse(fs.readFileSync(path.join(cwd, ".tempmail/setup-state.json"), "utf8"));
   assert.equal(saved.scriptName, "telegram-tempmail-example-com");
+  assert.equal(saved.d1DatabaseId, "d1-1");
 });
 
 test("performVerify reports ok with mocked clients", async () => {
