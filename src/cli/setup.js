@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { CloudflareClient } from "../lib/cloudflare.js";
