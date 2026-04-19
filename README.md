@@ -75,7 +75,9 @@ You can omit `--telegram-bot-token` in verify. Telegram webhook check will be ma
 ## Bot commands
 - `/start claim` claim owner on first use
 - `/start` show status
-- `/new` generate random alias
+- `/new` generate readable alias like `calm-river-4821`
+- `/new hello` create custom alias
+- `/new hello.team@domain.com` create custom alias from local-part input
 - `/status` show runtime status
 - `/whoami` show telegram ids
 - `/help` show command list

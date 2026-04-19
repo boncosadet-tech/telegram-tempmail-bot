@@ -1,5 +1,7 @@
 const VERSION = "2026-04-19-telegram-tempmail-v2";
 const OWNER_KEY = "owner";
+const ALIAS_ADJECTIVES = ["amber", "brisk", "calm", "clever", "dawn", "ember", "lunar", "nova", "quiet", "swift"];
+const ALIAS_NOUNS = ["field", "forest", "harbor", "meadow", "orbit", "river", "signal", "spring", "valley", "wave"];
 
 function htmlDecode(s) {
   return String(s || "")
@@ -29,10 +31,50 @@ function decodeMimeWords(input) {
   });
 }
 
-function randomLocal() {
-  const bytes = new Uint8Array(5);
+function randomItem(items) {
+  const bytes = new Uint8Array(1);
   crypto.getRandomValues(bytes);
-  return `tmp-${[...bytes].map((b) => b.toString(36).padStart(2, "0")).join("").slice(0, 10)}`;
+  return items[bytes[0] % items.length];
+}
+
+function randomDigits(length = 4) {
+  const digits = [];
+  const bytes = new Uint8Array(length);
+  crypto.getRandomValues(bytes);
+  for (const value of bytes) {
+    digits.push(String(value % 10));
+  }
+  return digits.join("");
+}
+
+function generateReadableLocal() {
+  return `${randomItem(ALIAS_ADJECTIVES)}-${randomItem(ALIAS_NOUNS)}-${randomDigits(4)}`;
+}
+
+function sanitizeRequestedLocal(input) {
+  const raw = String(input || "").trim().toLowerCase();
+  if (!raw) return "";
+  const localOnly = raw.split("@")[0];
+  const sanitized = localOnly
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/[._-]{2,}/g, "-")
+    .replace(/^[._-]+|[._-]+$/g, "")
+    .slice(0, 48);
+  if (!sanitized) return "";
+  if (!/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/.test(sanitized)) return "";
+  return sanitized;
+}
+
+function parseNewAlias(text) {
+  const parts = String(text || "").trim().split(/\s+/).slice(1);
+  if (parts.length === 0) {
+    return { local: generateReadableLocal(), custom: false };
+  }
+  const requested = sanitizeRequestedLocal(parts.join("-"));
+  if (!requested) {
+    return { local: "", custom: true, error: "Custom alias only supports letters, numbers, dot, dash, and underscore." };
+  }
+  return { local: requested, custom: true };
 }
 
 function cleanText(s) {
@@ -228,11 +270,26 @@ async function handleTelegram(request, env) {
   }
 
   if (text.startsWith("/new")) {
-    const addr = `${randomLocal()}@${domain}`;
+    const alias = parseNewAlias(text);
+    if (alias.error) {
+      await sendTelegram(
+        env,
+        replyChatId,
+        `${alias.error}\n\nUsage:\n/new\n/new hello\n/new hello-team\n/new hello.team@${domain}`
+      );
+      return new Response("ok", { status: 200 });
+    }
+    const addr = `${alias.local}@${domain}`;
     await sendTelegram(
       env,
       replyChatId,
-      `Temp email created:\n\n${addr}\n\nUse this address to receive OTP or verification email.`
+      [
+        alias.custom ? "Custom temp email created:" : "Temp email created:",
+        "",
+        addr,
+        "",
+        "Use this address to receive OTP or verification email."
+      ].join("\n")
     );
   } else if (text.startsWith("/status")) {
     await sendTelegram(env, replyChatId, ownerStatusText(domain, owner));
@@ -242,7 +299,7 @@ async function handleTelegram(request, env) {
     await sendTelegram(
       env,
       replyChatId,
-      `Commands:\n/start claim - claim owner (first use)\n/start - bot status\n/new - create random temp email\n/status - show runtime status\n/whoami - show your ids\n/help - help`
+      `Commands:\n/start claim - claim owner (first use)\n/start - bot status\n/new - create a readable temp email\n/new hello - create custom alias\n/status - show runtime status\n/whoami - show your ids\n/help - help`
     );
   } else {
     await sendTelegram(env, replyChatId, "Unknown command. Use /help.");

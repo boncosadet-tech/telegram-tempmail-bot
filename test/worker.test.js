@@ -95,6 +95,77 @@ test("telegram start claim stores owner in KV and acknowledges claim", async () 
   }
 });
 
+test("new command supports custom alias names", async () => {
+  const env = createEnv({
+    userId: "6083649512",
+    chatId: "6083649512",
+    claimedAt: "2026-04-19T00:00:00.000Z",
+    domain: "example.com"
+  });
+  const sentMessages = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, init) => {
+    sentMessages.push(JSON.parse(init.body));
+    return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  try {
+    const response = await worker.fetch(
+      new Request("https://worker.example/tg/secret-token", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "X-Telegram-Bot-Api-Secret-Token": "secret-token"
+        },
+        body: JSON.stringify(createTelegramUpdate("/new hello.team@example.com", { userId: 6083649512, chatId: 6083649512 }))
+      }),
+      env
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(sentMessages.length, 1);
+    assert.match(sentMessages[0].text, /Custom temp email created:/);
+    assert.match(sentMessages[0].text, /hello\.team@example\.com/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("new command generates readable default alias", async () => {
+  const env = createEnv({
+    userId: "6083649512",
+    chatId: "6083649512",
+    claimedAt: "2026-04-19T00:00:00.000Z",
+    domain: "example.com"
+  });
+  const sentMessages = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, init) => {
+    sentMessages.push(JSON.parse(init.body));
+    return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  try {
+    const response = await worker.fetch(
+      new Request("https://worker.example/tg/secret-token", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "X-Telegram-Bot-Api-Secret-Token": "secret-token"
+        },
+        body: JSON.stringify(createTelegramUpdate("/new", { userId: 6083649512, chatId: 6083649512 }))
+      }),
+      env
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(sentMessages.length, 1);
+    assert.match(sentMessages[0].text, /[a-z]+-[a-z]+-[0-9]{4}@example\.com/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("email handler forwards summary to claimed owner chat", async () => {
   const env = createEnv({
     userId: "6083649512",
