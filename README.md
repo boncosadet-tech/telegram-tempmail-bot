@@ -91,6 +91,7 @@ You can omit `--telegram-bot-token` in verify. Telegram webhook check will be ma
   - alias filter
   - create alias
   - OTP highlight
+  - Gmail-like formatted email detail view from HTML emails
   - delete one message
   - delete all OTP history
   - delete all history

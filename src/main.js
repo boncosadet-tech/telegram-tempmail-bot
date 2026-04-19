@@ -17,6 +17,7 @@ const SCHEMA_STATEMENTS = [
     sender TEXT NOT NULL,
     subject TEXT NOT NULL,
     preview_text TEXT NOT NULL,
+    rendered_html TEXT NOT NULL DEFAULT '',
     otp_code TEXT NOT NULL DEFAULT '-',
     is_otp INTEGER NOT NULL DEFAULT 0,
     size_kb INTEGER NOT NULL DEFAULT 0,
@@ -194,6 +195,92 @@ function getBestPreview(raw) {
   return cleanText(body).slice(0, 2200);
 }
 
+function extractHtmlBody(raw) {
+  const textHtml = raw.match(/Content-Type:\s*text\/html[\s\S]*?\n\n([\s\S]*?)(?=\n--|\nContent-Type:|$)/i);
+  return textHtml?.[1] || "";
+}
+
+function sanitizeUrl(href) {
+  const value = String(href || "").trim();
+  if (!value) return "";
+  if (/^(https?:|mailto:)/i.test(value)) return value;
+  return "";
+}
+
+function renderInlineText(text) {
+  const placeholderPattern = /\[\[LINK:([^\]|]+)\|([^\]]+)\]\]/g;
+  const pieces = [];
+  let lastIndex = 0;
+  for (const match of String(text || "").matchAll(placeholderPattern)) {
+    const index = match.index ?? 0;
+    const prefix = text.slice(lastIndex, index);
+    pieces.push(
+      escapeHtml(prefix).replace(
+        /((?:https?:\/\/|mailto:)[^\s<]+)/gi,
+        (value) => `<a href="${escapeHtml(value)}" target="_blank" rel="noopener noreferrer">${escapeHtml(value)}</a>`
+      )
+    );
+    const safeHref = sanitizeUrl(match[2]);
+    const label = escapeHtml(match[1]);
+    pieces.push(safeHref ? `<a href="${escapeHtml(safeHref)}" target="_blank" rel="noopener noreferrer">${label}</a>` : label);
+    lastIndex = index + match[0].length;
+  }
+  const suffix = text.slice(lastIndex);
+  pieces.push(
+    escapeHtml(suffix).replace(
+      /((?:https?:\/\/|mailto:)[^\s<]+)/gi,
+      (value) => `<a href="${escapeHtml(value)}" target="_blank" rel="noopener noreferrer">${escapeHtml(value)}</a>`
+    )
+  );
+  return pieces.join("");
+}
+
+function htmlToDisplayText(html) {
+  return cleanText(
+    String(html || "")
+      .replace(/<!--[\s\S]*?-->/g, " ")
+      .replace(/<(script|style|head|iframe|object|embed|svg|canvas|form|button|input|textarea|select)[^>]*>[\s\S]*?<\/\1>/gi, " ")
+      .replace(/<a\b[^>]*href=(['"]?)([^"' >]+)\1[^>]*>([\s\S]*?)<\/a>/gi, (_m, _q, href, inner) => {
+        const text = cleanText(inner);
+        const safeHref = sanitizeUrl(href);
+        return safeHref ? ` [[LINK:${text}|${safeHref}]] ` : text;
+      })
+      .replace(/<(br|hr)\s*\/?>/gi, "\n")
+      .replace(/<\/(p|div|section|article|header|footer|table|tr|blockquote|pre|h1|h2|h3|h4|h5|h6)>/gi, "\n\n")
+      .replace(/<(li)\b[^>]*>/gi, "\n• ")
+  );
+}
+
+function textToDisplayHtml(text) {
+  const normalized = String(text || "").replace(/\r/g, "").trim();
+  if (!normalized) {
+    return '<p class="email-empty">(no content)</p>';
+  }
+
+  const blocks = normalized.split(/\n{2,}/).map((block) => block.trim()).filter(Boolean);
+  const parts = [];
+  for (const block of blocks) {
+    const lines = block.split("\n").map((line) => line.trim()).filter(Boolean);
+    const isList = lines.length > 1 && lines.every((line) => line.startsWith("• "));
+    if (isList) {
+      parts.push(`<ul>${lines.map((line) => `<li>${renderInlineText(line.slice(2))}</li>`).join("")}</ul>`);
+      continue;
+    }
+    if (lines.length === 1 && lines[0].startsWith("• ")) {
+      parts.push(`<ul><li>${renderInlineText(lines[0].slice(2))}</li></ul>`);
+      continue;
+    }
+    parts.push(`<p>${lines.map((line) => renderInlineText(line)).join("<br>")}</p>`);
+  }
+  return parts.join("");
+}
+
+function renderEmailHtml(raw, previewText) {
+  const htmlBody = extractHtmlBody(raw);
+  const text = htmlBody ? htmlToDisplayText(htmlBody) : String(previewText || "");
+  return textToDisplayHtml(text);
+}
+
 function getRawKind(raw) {
   if (/Content-Type:\s*text\/html/i.test(raw)) return "text/html";
   if (/Content-Type:\s*text\/plain/i.test(raw)) return "text/plain";
@@ -362,6 +449,13 @@ async function ensureMailDb(env) {
   for (const statement of SCHEMA_STATEMENTS) {
     await runDb(env, statement);
   }
+  try {
+    await runDb(env, "ALTER TABLE messages ADD COLUMN rendered_html TEXT NOT NULL DEFAULT ''");
+  } catch (error) {
+    if (!String(error?.message || error).includes("duplicate column")) {
+      throw error;
+    }
+  }
   env.__mailDbReady = true;
 }
 
@@ -391,9 +485,9 @@ async function insertMessage(env, message) {
   await runDb(
     env,
     `INSERT INTO messages (
-      id, alias_local, alias_full, sender, subject, preview_text, otp_code,
+      id, alias_local, alias_full, sender, subject, preview_text, rendered_html, otp_code,
       is_otp, size_kb, raw_kind, received_at, expires_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       message.id,
       message.aliasLocal,
@@ -401,6 +495,7 @@ async function insertMessage(env, message) {
       message.sender,
       message.subject,
       message.previewText,
+      message.renderedHtml,
       message.otpCode,
       message.isOtp ? 1 : 0,
       message.sizeKb,
@@ -417,13 +512,13 @@ async function listMessages(env, aliasFilter = "") {
   const rows = aliasFilter
     ? await allDb(
         env,
-        `SELECT id, alias_local, alias_full, sender, subject, preview_text, otp_code, is_otp, size_kb, raw_kind, received_at, expires_at
+        `SELECT id, alias_local, alias_full, sender, subject, preview_text, rendered_html, otp_code, is_otp, size_kb, raw_kind, received_at, expires_at
          FROM messages WHERE alias_local = ? ORDER BY received_at DESC LIMIT 100`,
         [aliasFilter]
       )
     : await allDb(
         env,
-        `SELECT id, alias_local, alias_full, sender, subject, preview_text, otp_code, is_otp, size_kb, raw_kind, received_at, expires_at
+        `SELECT id, alias_local, alias_full, sender, subject, preview_text, rendered_html, otp_code, is_otp, size_kb, raw_kind, received_at, expires_at
          FROM messages ORDER BY received_at DESC LIMIT 100`
       );
   return rows;
@@ -434,7 +529,7 @@ async function getMessageById(env, id) {
   await purgeExpiredMessages(env);
   return firstDb(
     env,
-    `SELECT id, alias_local, alias_full, sender, subject, preview_text, otp_code, is_otp, size_kb, raw_kind, received_at, expires_at
+    `SELECT id, alias_local, alias_full, sender, subject, preview_text, rendered_html, otp_code, is_otp, size_kb, raw_kind, received_at, expires_at
      FROM messages WHERE id = ? LIMIT 1`,
     [id]
   );
@@ -540,6 +635,12 @@ function renderAppPage(domain) {
     .message.active { border-color: #60a5fa; }
     .pill { display: inline-block; border-radius: 999px; padding: 2px 8px; background: #1e3a8a; font-size: 12px; }
     pre { white-space: pre-wrap; word-break: break-word; background: #0b1020; padding: 12px; border-radius: 12px; border: 1px solid #243055; }
+    .email-surface { background: #f8fafc; color: #0f172a; border: 1px solid #cbd5e1; border-radius: 12px; padding: 18px; line-height: 1.6; }
+    .email-surface p { margin: 0 0 14px; }
+    .email-surface ul { margin: 0 0 14px 18px; padding: 0; }
+    .email-surface li { margin-bottom: 6px; }
+    .email-surface a { color: #2563eb; text-decoration: underline; }
+    .email-empty { color: #64748b; font-style: italic; }
     @media (max-width: 920px) { .wrap { grid-template-columns: 1fr; } aside { border-right: 0; border-bottom: 1px solid #243055; } }
   </style>
 </head>
@@ -583,7 +684,8 @@ function renderAppPage(domain) {
         <h2 id="detailSubject">Select a message</h2>
         <div class="muted" id="detailMeta">No message selected.</div>
         <div id="detailOtp"></div>
-        <pre id="detailPreview">Inbox preview will appear here.</pre>
+        <div id="detailHtml" class="email-surface"><p class="email-empty">Inbox preview will appear here.</p></div>
+        <pre id="detailPreview">Inbox preview text will appear here.</pre>
         <div class="row">
           <button id="deleteBtn" disabled>Delete message</button>
         </div>
@@ -667,7 +769,8 @@ function renderAppPage(domain) {
       document.getElementById('detailSubject').textContent = 'Select a message';
       document.getElementById('detailMeta').textContent = 'No message selected.';
       document.getElementById('detailOtp').innerHTML = '';
-      document.getElementById('detailPreview').textContent = 'Inbox preview will appear here.';
+      document.getElementById('detailHtml').innerHTML = '<p class=\"email-empty\">Inbox preview will appear here.</p>';
+      document.getElementById('detailPreview').textContent = 'Inbox preview text will appear here.';
       document.getElementById('deleteBtn').disabled = true;
     }
 
@@ -679,6 +782,7 @@ function renderAppPage(domain) {
       document.getElementById('detailSubject').textContent = message.subject;
       document.getElementById('detailMeta').textContent = message.alias_full + ' • ' + message.sender + ' • ' + formatTime(message.received_at);
       document.getElementById('detailOtp').innerHTML = message.is_otp ? '<span class=\"pill\">OTP ' + message.otp_code + '</span>' : '';
+      document.getElementById('detailHtml').innerHTML = message.rendered_html || '<p class=\"email-empty\">(no html preview)</p>';
       document.getElementById('detailPreview').textContent = message.preview_text || '(no preview)';
       document.getElementById('deleteBtn').disabled = false;
     }
@@ -989,6 +1093,7 @@ export default {
         sender: from,
         subject,
         previewText: preview || "(no preview)",
+        renderedHtml: renderEmailHtml(raw, preview || "(no preview)"),
         otpCode: code,
         isOtp,
         sizeKb,

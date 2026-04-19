@@ -20,6 +20,7 @@ const D1_SCHEMA_STATEMENTS = [
     sender TEXT NOT NULL,
     subject TEXT NOT NULL,
     preview_text TEXT NOT NULL,
+    rendered_html TEXT NOT NULL DEFAULT '',
     otp_code TEXT NOT NULL DEFAULT '-',
     is_otp INTEGER NOT NULL DEFAULT 0,
     size_kb INTEGER NOT NULL DEFAULT 0,
@@ -63,6 +64,13 @@ export function readSavedState(cwd) {
 async function applyD1Migrations(cf, accountId, databaseId) {
   for (const statement of D1_SCHEMA_STATEMENTS) {
     await cf.queryD1(accountId, databaseId, statement);
+  }
+  try {
+    await cf.queryD1(accountId, databaseId, "ALTER TABLE messages ADD COLUMN rendered_html TEXT NOT NULL DEFAULT ''");
+  } catch (error) {
+    if (!String(error?.message || error).toLowerCase().includes("duplicate column")) {
+      throw error;
+    }
   }
 }
 

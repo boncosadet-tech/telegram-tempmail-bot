@@ -21,12 +21,90 @@ class MockKV {
   }
 }
 
-function createEnv(owner = null) {
+class MockD1Statement {
+  constructor(db, sql, params = []) {
+    this.db = db;
+    this.sql = sql;
+    this.params = params;
+  }
+
+  bind(...params) {
+    return new MockD1Statement(this.db, this.sql, params);
+  }
+
+  async run() {
+    const sql = this.sql.trim();
+    if (sql.startsWith("CREATE TABLE") || sql.startsWith("CREATE INDEX")) {
+      return { meta: { changes: 0 } };
+    }
+    if (sql.startsWith("ALTER TABLE messages ADD COLUMN rendered_html")) {
+      if (this.db.renderedHtmlColumnAdded) {
+        throw new Error("duplicate column name: rendered_html");
+      }
+      this.db.renderedHtmlColumnAdded = true;
+      return { meta: { changes: 0 } };
+    }
+    if (sql.startsWith("INSERT INTO aliases")) {
+      const [aliasLocal, source, createdAt, lastSeenAt] = this.params;
+      this.db.aliases.set(aliasLocal, { alias_local: aliasLocal, source, created_at: createdAt, last_seen_at: lastSeenAt });
+      return { meta: { changes: 1 } };
+    }
+    if (sql.startsWith("INSERT INTO messages")) {
+      const [
+        id, aliasLocal, aliasFull, sender, subject, previewText, renderedHtml,
+        otpCode, isOtp, sizeKb, rawKind, receivedAt, expiresAt
+      ] = this.params;
+      this.db.messages.push({
+        id,
+        alias_local: aliasLocal,
+        alias_full: aliasFull,
+        sender,
+        subject,
+        preview_text: previewText,
+        rendered_html: renderedHtml,
+        otp_code: otpCode,
+        is_otp: isOtp,
+        size_kb: sizeKb,
+        raw_kind: rawKind,
+        received_at: receivedAt,
+        expires_at: expiresAt
+      });
+      return { meta: { changes: 1 } };
+    }
+    if (sql.startsWith("DELETE FROM messages WHERE expires_at")) {
+      return { meta: { changes: 0 } };
+    }
+    return { meta: { changes: 0 } };
+  }
+
+  async all() {
+    return { results: [] };
+  }
+
+  async first() {
+    return null;
+  }
+}
+
+class MockD1 {
+  constructor() {
+    this.messages = [];
+    this.aliases = new Map();
+    this.renderedHtmlColumnAdded = false;
+  }
+
+  prepare(sql) {
+    return new MockD1Statement(this, sql);
+  }
+}
+
+function createEnv(owner = null, extras = {}) {
   return {
     DOMAIN: "example.com",
     BOT_TOKEN: "bot-token",
     WEBHOOK_SECRET: "secret-token",
-    STATE_KV: new MockKV(owner ? { owner: JSON.stringify(owner) } : {})
+    STATE_KV: new MockKV(owner ? { owner: JSON.stringify(owner) } : {}),
+    ...extras
   };
 }
 
@@ -272,6 +350,40 @@ test("email handler still sends when waitUntil is unavailable", async () => {
     assert.equal(sentMessages.length, 1);
     assert.match(sentMessages[0].text, /To: tmp-noctx@example.com/);
     assert.match(sentMessages[0].text, /Possible code: 654321/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("email handler stores html-like rendered content for dashboard view", async () => {
+  const mailDb = new MockD1();
+  const env = createEnv({
+    userId: "6083649512",
+    chatId: "6083649512",
+    claimedAt: "2026-04-19T00:00:00.000Z",
+    domain: "example.com"
+  }, { MAIL_DB: mailDb });
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } });
+
+  try {
+    await worker.email(
+      {
+        from: "noreply@example.net",
+        to: "html-view@example.com",
+        headers: new Headers({ subject: "Welcome" }),
+        raw: createRawEmail(
+          "Subject: Welcome\nContent-Type: multipart/alternative; boundary=abc\n\n--abc\nContent-Type: text/plain\n\nHello there\n\n--abc\nContent-Type: text/html\n\n<p>Hello <strong>there</strong></p><p>Visit <a href=\"https://example.com/verify\">Verify</a></p>\n--abc--"
+        )
+      },
+      env,
+      { waitUntil(promise) { return promise; } }
+    );
+
+    assert.equal(mailDb.messages.length, 1);
+    assert.match(mailDb.messages[0].rendered_html, /<p>Hello there<\/p>/);
+    assert.match(mailDb.messages[0].rendered_html, /<a href="https:\/\/example.com\/verify"/);
   } finally {
     globalThis.fetch = originalFetch;
   }
