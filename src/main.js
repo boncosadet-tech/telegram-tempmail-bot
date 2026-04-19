@@ -82,14 +82,21 @@ async function readRaw(stream, limit = 120000) {
 
 function extractLikelyCode(text) {
   const s = String(text || "");
+  const stopwords = new Set(["code", "kode", "token", "otp", "pin"]);
   const patterns = [
-    /(?:kode|code|otp|verification|verifikasi|pin|token)[^A-Z0-9]{0,30}([A-Z0-9]{4,10})/i,
-    /\b([0-9]{4,8})\b/,
-    /\b([A-Z0-9]{6,10})\b/
+    /(?:kode|code|otp|verification|verifikasi|pin|token)[^0-9A-Z]{0,30}([0-9]{4,8})/gi,
+    /(?:kode|code|otp|verification|verifikasi|pin|token)[^0-9A-Z]{0,30}([A-Z0-9]{6,10})/gi,
+    /\b([0-9]{4,8})\b/g,
+    /\b([A-Z0-9]{6,10})\b/g
   ];
   for (const re of patterns) {
-    const m = s.match(re);
-    if (m && m[1]) return m[1];
+    for (const match of s.matchAll(re)) {
+      const candidate = String(match[1] || "").trim();
+      if (!candidate) continue;
+      if (stopwords.has(candidate.toLowerCase())) continue;
+      if (/[A-Z]/i.test(candidate) && !/[0-9]/.test(candidate)) continue;
+      return candidate;
+    }
   }
   return "-";
 }

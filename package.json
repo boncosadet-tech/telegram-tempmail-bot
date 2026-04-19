@@ -11,6 +11,8 @@
   },
   "files": [
     "README.md",
+    "AI.md",
+    "docs",
     "bin",
     "wrangler.toml",
     "src"

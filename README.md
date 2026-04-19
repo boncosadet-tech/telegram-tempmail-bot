@@ -2,6 +2,11 @@
 
 Private temp-mail bot on Cloudflare Email Routing + Cloudflare Workers + Telegram.
 
+## Docs
+- [AI.md](./AI.md)
+- [Project Context](./docs/project-context.md)
+- [Development Roadmap](./docs/development-roadmap.md)
+
 ## What this repo does
 - Auto setup Cloudflare Worker, KV, Email Routing catch-all, and Telegram webhook.
 - Uses one catch-all worker route (`*@domain`) and virtual aliases from `/new`.
@@ -80,6 +85,11 @@ You can omit `--telegram-bot-token` in verify. Telegram webhook check will be ma
 - `telegram-tempmail-admin --action rotate-secret`
 
 The interactive app also exposes both actions from the main menu.
+
+## Runtime hosting model
+- After setup, the live system runs on Cloudflare + Telegram only.
+- Termux/local machine can be offline; inbound email, webhook handling, KV state, and Telegram delivery continue to run.
+- Local environment is only needed for setup, verify, admin actions, upgrades, and publishing.
 
 ## Notes
 - Setup only manages catch-all email rule. Literal email rules are preserved.
