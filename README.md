@@ -1,133 +1,523 @@
 # telegram-tempmail-bot
 
-Private temp-mail bot on Cloudflare Email Routing + Cloudflare Workers + Telegram.
+Aplikasi npm interaktif untuk membuat **temp mail pribadi** dengan:
 
-## Docs
-- [AI.md](./AI.md)
-- [Project Context](./docs/project-context.md)
-- [Development Roadmap](./docs/development-roadmap.md)
+- Cloudflare Email Routing
+- Cloudflare Workers
+- Cloudflare KV
+- Cloudflare D1
+- Telegram Bot
+- private web dashboard
 
-## What this repo does
-- Auto setup Cloudflare Worker, KV, Email Routing catch-all, and Telegram webhook.
-- Uses one catch-all worker route (`*@domain`) and virtual aliases from `/new`.
-- Owner is claimed once via `/start claim` in private chat.
+Runtime-nya berjalan di Cloudflare. Setelah setup selesai, Termux/laptop/VPS lokal boleh mati.
 
-## Required inputs
-- `domain`
-- `cf-email`
-- `cf-global-key`
-- `telegram-bot-token`
-
-Cloudflare Global API Key must be paired with Cloudflare account email.
-
-## Interactive app
-```bash
-npm start
-```
-
-This opens a simple terminal menu for:
-- setup
-- verify
-- show saved local state
-
-`npm run setup` and `npm run verify` are also interactive if required inputs are missing.
-
-## Run from npm package
-After publish, the app can be started with:
+## Status paket
 
 ```bash
 npx telegram-tempmail-bot
 ```
 
-Direct subcommands are also available:
+Subcommand langsung:
 
 ```bash
-npx telegram-tempmail-admin
-npx telegram-tempmail-setup
-npx telegram-tempmail-verify
+npx --package telegram-tempmail-bot telegram-tempmail-setup
+npx --package telegram-tempmail-bot telegram-tempmail-verify
+npx --package telegram-tempmail-bot telegram-tempmail-admin
 ```
 
-## One-command setup
+## Apa yang bisa dibuat
+
+Setelah setup, kamu akan punya:
+
+- email sementara di domain sendiri, contoh `hello@domainkamu.com`
+- alias custom dari Telegram, contoh `/new tokopedia`
+- catch-all email, jadi alamat apa pun di domain bisa diterima
+- notifikasi email masuk ke Telegram
+- OTP/code extraction otomatis
+- dashboard web private untuk melihat inbox
+- parsing email HTML ke tampilan detail yang lebih rapi
+- hapus histori OTP/manual cleanup
+
+## Apakah bisa pakai Cloudflare Free?
+
+Bisa untuk pemakaian personal/ringan.
+
+Yang dipakai:
+
+| Komponen | Fungsi | Free plan |
+| --- | --- | --- |
+| Cloudflare DNS | domain diarahkan ke Cloudflare | bisa |
+| Email Routing | menerima email domain | tersedia di semua plan |
+| Email Workers | memproses email masuk dengan Worker | ikut Workers pricing |
+| Workers | menjalankan bot/web/API | ada Free plan dengan limit |
+| Workers KV | owner/session state | ada Free plan dengan limit |
+| D1 | inbox/dashboard storage | tersedia di Free dan Paid Workers plan |
+
+Catatan batasan:
+
+- Cloudflare Email Routing punya batas ukuran email, jadi email sangat besar/attachment berat bukan target utama.
+- Worker/KV/D1 Free punya quota harian/bulanan. Untuk tempmail pribadi biasanya cukup, tapi bukan untuk layanan publik besar.
+- Ini bukan mailbox hosting penuh. Ini sistem routing + dashboard tempmail pribadi.
+
+Rujukan resmi:
+
+- Cloudflare Email Routing: https://developers.cloudflare.com/email-routing/
+- Cloudflare Workers pricing: https://developers.cloudflare.com/workers/platform/pricing/
+- Cloudflare Global API Key: https://developers.cloudflare.com/fundamentals/api/get-started/keys/
+
+## Prasyarat
+
+Sebelum setup, siapkan:
+
+1. **Domain sendiri**
+   - domain harus bisa dipindahkan nameserver-nya ke Cloudflare
+2. **Akun Cloudflare**
+   - Free plan cukup
+3. **Cloudflare account email**
+   - email login Cloudflare, contoh `nama@gmail.com`
+4. **Cloudflare Global API Key**
+   - dipakai oleh tool untuk setup otomatis
+5. **Telegram Bot Token**
+   - dibuat lewat BotFather
+6. **Node.js 20+**
+   - kalau pakai `npx`, tidak perlu clone repo
+
+## Dependencies yang dipasang
+
+Kalau menjalankan dari npm:
+
 ```bash
-npm run setup -- \
-  --domain yourdomain.com \
-  --cf-email your-cloudflare-email@example.com \
-  --cf-global-key <CLOUDFLARE_GLOBAL_API_KEY> \
-  --telegram-bot-token <TELEGRAM_BOT_TOKEN>
+npx telegram-tempmail-bot
 ```
 
-The command prints a claim link:
-`https://t.me/<bot_username>?start=claim`
+Kamu hanya butuh:
 
-Open it, then the owner is claimed automatically.
+- Node.js 20 atau lebih baru
+- akses internet
+- akun Cloudflare
+- token bot Telegram
 
-## Verify setup
+Kalau clone repo untuk development:
+
 ```bash
-npm run verify -- \
-  --domain yourdomain.com \
-  --cf-email your-cloudflare-email@example.com \
-  --cf-global-key <CLOUDFLARE_GLOBAL_API_KEY> \
-  --telegram-bot-token <TELEGRAM_BOT_TOKEN>
+git clone https://github.com/shizukudes/telegram-tempmail-bot.git
+cd telegram-tempmail-bot
+npm install
+npm start
 ```
 
-You can omit `--telegram-bot-token` in verify. Telegram webhook check will be marked as pending.
+Dependency dev utama:
 
-## Bot commands
-- `/start claim` claim owner on first use
-- `/start` show status
-- `/new` generate readable alias like `calm-river-4821`
-- `/new hello` create custom alias
-- `/new hello.team@domain.com` create custom alias from local-part input
-- `/web` generate owner-only login link for private dashboard
-- `/status` show runtime status
-- `/whoami` show telegram ids
-- `/help` show command list
+- `wrangler` untuk development manual Cloudflare Worker
 
-## Private web dashboard
-- Runtime tetap Cloudflare-only: Worker + Email Routing + KV + D1
-- Login dashboard via bot command `/web`
-- Dashboard owner-only supports:
-  - inbox list
-  - alias filter
-  - create alias
-  - OTP highlight
-  - Gmail-like formatted email detail view from HTML emails
-  - delete one message
-  - delete all OTP history
-  - delete all history
-- OTP history auto-expire lebih cepat daripada email biasa
+Setup production normal **tidak wajib** pakai `wrangler login`, karena app memakai Cloudflare API langsung.
 
-## Admin commands
-- `telegram-tempmail-admin --action reset-owner`
-- `telegram-tempmail-admin --action rotate-secret`
+## Step 1 — Onboarding domain ke Cloudflare
 
-The interactive app also exposes both actions from the main menu.
+Tujuan: domain kamu aktif di Cloudflare DNS.
 
-## Runtime hosting model
-- After setup, the live system runs on Cloudflare + Telegram only.
-- Termux/local machine can be offline; inbound email, webhook handling, KV state, and Telegram delivery continue to run.
-- Local environment is only needed for setup, verify, admin actions, upgrades, and publishing.
+Langkah:
 
-## Notes
-- Setup only manages catch-all email rule. Literal email rules are preserved.
-- If existing catch-all points to another worker, setup fails unless `--force`.
-- Cloudflare Email Routing max message size is 25 MiB.
-- Re-running setup rotates the webhook secret and updates the webhook URL.
-- Do not commit API keys or bot tokens.
+1. Login ke Cloudflare.
+2. Klik **Add a domain** / **Add site**.
+3. Masukkan domain kamu, contoh:
 
-## GitHub publish workflow
-This repo includes [publish-npm.yml](./.github/workflows/publish-npm.yml) to publish the package from GitHub Actions.
+   ```text
+   domainkamu.com
+   ```
 
-Requirements:
-- add repo secret `NPM_TOKEN`
-- use an npm token that can publish public packages
+4. Pilih plan **Free**.
+5. Cloudflare akan scan DNS record.
+6. Lanjutkan sampai Cloudflare memberi 2 nameserver, contoh:
 
-Triggers:
-- push tag like `v1.0.3`
-- GitHub release published
-- manual `workflow_dispatch`
+   ```text
+   ada.ns.cloudflare.com
+   ben.ns.cloudflare.com
+   ```
 
-## GitHub CI workflow
-This repo also includes [ci.yml](./.github/workflows/ci.yml) for development checks on:
-- push to `master`
-- pull requests targeting `master`
+7. Buka panel registrar tempat kamu beli domain.
+8. Ganti nameserver domain ke nameserver dari Cloudflare.
+9. Tunggu sampai status domain di Cloudflare menjadi **Active**.
+
+Cara cek berhasil:
+
+- Dashboard Cloudflare menampilkan domain dengan status **Active**.
+- Menu DNS/Email Routing/Workers bisa dibuka.
+
+Catatan:
+
+- Kalau domain masih punya email lama aktif, hati-hati. Setup ini akan mengelola Email Routing/catch-all.
+- Untuk domain percobaan/kosong, aman lanjut.
+
+## Step 2 — Buat Telegram Bot Token
+
+Tujuan: bot Telegram menjadi tempat kontrol dan notifikasi email.
+
+Langkah:
+
+1. Buka Telegram.
+2. Chat ke:
+
+   ```text
+   @BotFather
+   ```
+
+3. Kirim:
+
+   ```text
+   /newbot
+   ```
+
+4. Ikuti instruksi nama bot dan username bot.
+5. BotFather akan memberi token seperti:
+
+   ```text
+   1234567890:AAxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+   ```
+
+Simpan token itu. Jangan upload ke GitHub atau chat publik.
+
+## Step 3 — Ambil Cloudflare Global API Key
+
+Tujuan: app bisa otomatis membuat Worker, KV, D1, Email Routing, dan webhook.
+
+Langkah dari dashboard Cloudflare:
+
+1. Login ke Cloudflare.
+2. Klik ikon profil kanan atas.
+3. Masuk ke **My Profile**.
+4. Buka menu **API Tokens**.
+5. Scroll ke bagian **API Keys**.
+6. Pada **Global API Key**, klik **View**.
+7. Cloudflare mungkin meminta password/2FA.
+8. Copy Global API Key.
+
+Data yang perlu kamu punya:
+
+```text
+Cloudflare email: email-login-cloudflare@example.com
+Global API Key: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+Peringatan keamanan:
+
+- Global API Key punya akses luas ke akun Cloudflare.
+- Jangan commit ke repo.
+- Jangan kirim ke grup/chat publik.
+- Kalau pernah bocor, langsung **Change** / rotate dari halaman yang sama.
+
+## Step 4 — Jalankan setup interaktif
+
+Cara paling gampang:
+
+```bash
+npx telegram-tempmail-bot
+```
+
+Pilih menu:
+
+```text
+1. Setup
+```
+
+Isi data:
+
+```text
+Domain: domainkamu.com
+Cloudflare email: email-login-cloudflare@example.com
+Cloudflare Global API Key: <GLOBAL_API_KEY>
+Telegram bot token: <BOT_TOKEN>
+Worker script name: telegram-tempmail
+```
+
+Kalau mau langsung satu command:
+
+```bash
+npx --package telegram-tempmail-bot telegram-tempmail-setup \
+  --domain domainkamu.com \
+  --cf-email email-login-cloudflare@example.com \
+  --cf-global-key <GLOBAL_API_KEY> \
+  --telegram-bot-token <BOT_TOKEN> \
+  --script-name telegram-tempmail
+```
+
+Yang otomatis dibuat:
+
+- Cloudflare Worker
+- Worker URL `workers.dev`
+- KV namespace untuk owner/session
+- D1 database untuk inbox dashboard
+- schema D1
+- Email Routing DNS
+- catch-all route ke Worker
+- Telegram webhook
+
+Setelah setup selesai, app akan menampilkan link claim:
+
+```text
+https://t.me/<bot_username>?start=claim
+```
+
+Buka link itu dari akun Telegram kamu untuk menjadi owner.
+
+## Step 5 — Verifikasi setup
+
+Jalankan:
+
+```bash
+npx --package telegram-tempmail-bot telegram-tempmail-verify \
+  --domain domainkamu.com \
+  --cf-email email-login-cloudflare@example.com \
+  --cf-global-key <GLOBAL_API_KEY> \
+  --telegram-bot-token <BOT_TOKEN> \
+  --script-name telegram-tempmail
+```
+
+Hasil sehat biasanya seperti:
+
+```text
+OK zone
+OK workers-subdomain
+OK binding DOMAIN
+OK binding STATE_KV
+OK binding MAIL_DB
+OK d1-query
+OK email-routing
+OK catch-all
+OK owner-claim
+OK telegram-webhook
+OK verify - all critical checks passed
+```
+
+Kalau `owner-claim` masih pending, buka bot dan kirim:
+
+```text
+/start claim
+```
+
+## Step 6 — Pakai bot
+
+Command bot:
+
+```text
+/start claim
+```
+
+Claim owner pertama kali.
+
+```text
+/new
+```
+
+Buat alias readable otomatis, contoh:
+
+```text
+calm-river-4821@domainkamu.com
+```
+
+```text
+/new tokopedia
+```
+
+Buat alias custom:
+
+```text
+tokopedia@domainkamu.com
+```
+
+```text
+/new hello.team@domainkamu.com
+```
+
+Input full email juga diterima; yang dipakai local-part-nya.
+
+```text
+/web
+```
+
+Minta link login dashboard private.
+
+```text
+/status
+```
+
+Cek status bot.
+
+```text
+/help
+```
+
+Lihat bantuan.
+
+## Step 7 — Pakai web dashboard private
+
+1. Buka bot Telegram.
+2. Kirim:
+
+   ```text
+   /web
+   ```
+
+3. Bot akan mengirim link login sekali pakai.
+4. Buka link tersebut.
+5. Dashboard private terbuka.
+
+Fitur dashboard:
+
+- lihat inbox terbaru
+- filter per alias
+- buat alias baru
+- lihat OTP/code
+- lihat email HTML dalam tampilan detail yang lebih rapi
+- hapus 1 email
+- hapus semua histori OTP
+- hapus semua histori email
+
+Dashboard tidak bisa dibuka publik tanpa session owner.
+
+## Step 8 — Test email masuk
+
+1. Buat alias:
+
+   ```text
+   /new test
+   ```
+
+2. Kirim email dari Gmail/email lain ke:
+
+   ```text
+   test@domainkamu.com
+   ```
+
+3. Cek Telegram.
+4. Cek dashboard web dari `/web`.
+
+Jika email belum muncul:
+
+- tunggu 1–5 menit
+- cek domain sudah Active di Cloudflare
+- cek verify command
+- pastikan catch-all mengarah ke Worker
+
+## Admin command
+
+Reset owner:
+
+```bash
+npx --package telegram-tempmail-bot telegram-tempmail-admin \
+  --action reset-owner \
+  --domain domainkamu.com \
+  --cf-email email-login-cloudflare@example.com \
+  --cf-global-key <GLOBAL_API_KEY> \
+  --script-name telegram-tempmail
+```
+
+Rotate webhook secret:
+
+```bash
+npx --package telegram-tempmail-bot telegram-tempmail-admin \
+  --action rotate-secret \
+  --domain domainkamu.com \
+  --cf-email email-login-cloudflare@example.com \
+  --cf-global-key <GLOBAL_API_KEY> \
+  --telegram-bot-token <BOT_TOKEN> \
+  --script-name telegram-tempmail
+```
+
+## Troubleshooting
+
+### Cloudflare API: `Invalid format for X-Auth-Key header`
+
+Penyebab umum:
+
+- Global API Key kosong
+- salah copy
+- memakai API Token, bukan Global API Key
+- key sudah di-rotate
+
+Solusi:
+
+- ambil ulang Global API Key dari **My Profile > API Tokens > API Keys**
+- pastikan `--cf-email` adalah email login Cloudflare yang benar
+
+### Domain tidak ditemukan
+
+Penyebab:
+
+- domain belum ditambahkan ke Cloudflare
+- nameserver belum diarahkan ke Cloudflare
+- status belum Active
+
+Solusi:
+
+- ulang Step 1
+- tunggu propagasi nameserver
+
+### Email tidak masuk
+
+Cek:
+
+```bash
+npx --package telegram-tempmail-bot telegram-tempmail-verify ...
+```
+
+Pastikan:
+
+- Email Routing ready
+- catch-all mengarah ke Worker
+- webhook Telegram OK
+- owner sudah claim
+
+### Dashboard tidak bisa dibuka
+
+Gunakan `/web`, jangan langsung buka `/app` tanpa login.
+
+Kalau link expired:
+
+```text
+/web
+```
+
+lalu buka link baru.
+
+## Development
+
+Clone repo:
+
+```bash
+git clone https://github.com/shizukudes/telegram-tempmail-bot.git
+cd telegram-tempmail-bot
+npm install
+npm run check
+npm run test
+```
+
+Branch default repo: `master`.
+
+## GitHub Actions
+
+Repo ini punya:
+
+- CI untuk push/PR ke `master`
+- publish workflow untuk npm saat tag `v*` dibuat
+
+Release flow:
+
+```bash
+# edit package.json version
+npm run check
+npm run test
+git add .
+git commit -m "Release ..."
+git push origin master
+git tag vX.Y.Z
+git push origin vX.Y.Z
+```
+
+Setelah tag dipush, GitHub Actions akan publish ke npm memakai secret `NPM_TOKEN`.
+
+## Dokumen tambahan
+
+- [AI.md](./AI.md)
+- [Project Context](./docs/project-context.md)
+- [Development Roadmap](./docs/development-roadmap.md)
