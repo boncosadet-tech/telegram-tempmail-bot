@@ -1,7 +1,7 @@
 {
   "name": "telegram-tempmail-bot",
   "description": "Interactive npm app to provision a private Telegram temp-mail bot on Cloudflare Email Routing and Workers.",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "type": "module",
   "bin": {
     "telegram-tempmail-bot": "./bin/telegram-tempmail-bot",
