@@ -1,0 +1,61 @@
+plugins {
+    id "com.android.application"
+    id "kotlin-android"
+    id "dev.flutter.flutter-gradle-plugin"
+}
+
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file("key.properties")
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
+def packageName = System.getenv("ANDROID_PACKAGE_NAME") ?: "id.shizukudes.telegram_tempmail"
+def versionNameValue = System.getenv("ANDROID_VERSION_NAME") ?: "0.1.0"
+def versionCodeValue = (System.getenv("ANDROID_VERSION_CODE") ?: "1") as Integer
+
+android {
+    namespace = "id.shizukudes.telegram_tempmail"
+    compileSdk = flutter.compileSdkVersion
+    ndkVersion = flutter.ndkVersion
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = JavaVersion.VERSION_17.toString()
+    }
+
+    defaultConfig {
+        applicationId = packageName
+        minSdk = 23
+        targetSdk = flutter.targetSdkVersion
+        versionCode = versionCodeValue
+        versionName = versionNameValue
+    }
+
+    signingConfigs {
+        release {
+            if (keystorePropertiesFile.exists()) {
+                keyAlias = keystoreProperties["keyAlias"]
+                keyPassword = keystoreProperties["keyPassword"]
+                storeFile = file(keystoreProperties["storeFile"])
+                storePassword = keystoreProperties["storePassword"]
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            signingConfig = keystorePropertiesFile.exists() ? signingConfigs.release : signingConfigs.debug
+            shrinkResources = false
+            minifyEnabled = false
+        }
+    }
+}
+
+flutter {
+    source = "../.."
+}

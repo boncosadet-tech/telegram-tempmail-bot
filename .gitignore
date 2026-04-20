@@ -4,3 +4,13 @@ node_modules/
 .env.*
 *.log
 .tempmail/
+
+# Flutter mobile app
+apps/mobile/.dart_tool/
+apps/mobile/.flutter-plugins
+apps/mobile/.flutter-plugins-dependencies
+apps/mobile/build/
+apps/mobile/android/local.properties
+apps/mobile/android/key.properties
+apps/mobile/android/app/*.jks
+apps/mobile/android/app/*.keystore
