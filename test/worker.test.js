@@ -119,6 +119,20 @@ function createTelegramUpdate(text, { userId = 42, chatId = 42, chatType = "priv
   };
 }
 
+function createTelegramCallback(data, { userId = 42, chatId = 42, chatType = "private" } = {}) {
+  return {
+    callback_query: {
+      id: `cb-${Date.now()}`,
+      data,
+      from: { id: userId },
+      message: {
+        message_id: 2,
+        chat: { id: chatId, type: chatType }
+      }
+    }
+  };
+}
+
 function createRawEmail(text) {
   const encoder = new TextEncoder();
   const bytes = encoder.encode(text);
@@ -206,8 +220,9 @@ test("web command issues owner-only dashboard login link", async () => {
 
     assert.equal(response.status, 200);
     assert.equal(sentMessages.length, 1);
-    assert.match(sentMessages[0].text, /Dashboard login link:/);
+    assert.match(sentMessages[0].text, /Dashboard private/);
     assert.match(sentMessages[0].text, /https:\/\/telegram-tempmail\.example\.workers\.dev\/auth\/telegram\?token=/);
+    assert.equal(sentMessages[0].reply_markup.inline_keyboard[0][0].text, "📬 Buka dashboard");
     const loginKeys = Array.from(env.STATE_KV.store.keys()).filter((key) => key.startsWith("login:"));
     assert.equal(loginKeys.length, 1);
   } finally {
@@ -244,8 +259,9 @@ test("new command supports custom alias names", async () => {
 
     assert.equal(response.status, 200);
     assert.equal(sentMessages.length, 1);
-    assert.match(sentMessages[0].text, /Custom temp email created:/);
+    assert.match(sentMessages[0].text, /Custom temp email dibuat/);
     assert.match(sentMessages[0].text, /hello\.team@example\.com/);
+    assert.ok(sentMessages[0].reply_markup.inline_keyboard.flat().some((button) => button.callback_data === "new"));
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -281,6 +297,131 @@ test("new command generates readable default alias", async () => {
     assert.equal(response.status, 200);
     assert.equal(sentMessages.length, 1);
     assert.match(sentMessages[0].text, /[a-z]+-[a-z]+-[0-9]{4}@example\.com/);
+    assert.ok(sentMessages[0].reply_markup.inline_keyboard.flat().some((button) => button.callback_data === "web"));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("menu command shows Telegram inline control center", async () => {
+  const env = createEnv({
+    userId: "6083649512",
+    chatId: "6083649512",
+    claimedAt: "2026-04-19T00:00:00.000Z",
+    domain: "example.com"
+  });
+  const sentMessages = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, init) => {
+    sentMessages.push(JSON.parse(init.body));
+    return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  try {
+    const response = await worker.fetch(
+      new Request("https://worker.example/tg/secret-token", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "X-Telegram-Bot-Api-Secret-Token": "secret-token"
+        },
+        body: JSON.stringify(createTelegramUpdate("/menu", { userId: 6083649512, chatId: 6083649512 }))
+      }),
+      env
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(sentMessages.length, 1);
+    assert.match(sentMessages[0].text, /TempMail Control Center/);
+    const buttons = sentMessages[0].reply_markup.inline_keyboard.flat();
+    assert.ok(buttons.some((button) => button.callback_data === "new"));
+    assert.ok(buttons.some((button) => button.callback_data === "web"));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("callback new shows domain picker when multiple domains are configured", async () => {
+  const owner = {
+    userId: "6083649512",
+    chatId: "6083649512",
+    claimedAt: "2026-04-19T00:00:00.000Z",
+    domain: "example.com"
+  };
+  const env = createEnv(owner, {
+    STATE_KV: new MockKV({
+      owner: JSON.stringify(owner),
+      domains: JSON.stringify(["example.com", "second.example"])
+    })
+  });
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), body: JSON.parse(init.body) });
+    return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  try {
+    const response = await worker.fetch(
+      new Request("https://worker.example/tg/secret-token", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "X-Telegram-Bot-Api-Secret-Token": "secret-token"
+        },
+        body: JSON.stringify(createTelegramCallback("new", { userId: 6083649512, chatId: 6083649512 }))
+      }),
+      env
+    );
+
+    assert.equal(response.status, 200);
+    assert.ok(calls.some((call) => call.url.includes("answerCallbackQuery")));
+    const message = calls.find((call) => call.body.chat_id);
+    assert.match(message.body.text, /Pilih domain/);
+    const buttons = message.body.reply_markup.inline_keyboard.flat();
+    assert.ok(buttons.some((button) => button.callback_data === "new:1" && button.text === "@second.example"));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("callback new domain creates readable alias on selected domain", async () => {
+  const owner = {
+    userId: "6083649512",
+    chatId: "6083649512",
+    claimedAt: "2026-04-19T00:00:00.000Z",
+    domain: "example.com"
+  };
+  const env = createEnv(owner, {
+    STATE_KV: new MockKV({
+      owner: JSON.stringify(owner),
+      domains: JSON.stringify(["example.com", "second.example"])
+    })
+  });
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), body: JSON.parse(init.body) });
+    return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  try {
+    const response = await worker.fetch(
+      new Request("https://worker.example/tg/secret-token", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "X-Telegram-Bot-Api-Secret-Token": "secret-token"
+        },
+        body: JSON.stringify(createTelegramCallback("new:1", { userId: 6083649512, chatId: 6083649512 }))
+      }),
+      env
+    );
+
+    assert.equal(response.status, 200);
+    const message = calls.find((call) => call.body.chat_id);
+    assert.match(message.body.text, /[a-z]+-[a-z]+-[0-9]{4}@second\.example/);
+    assert.ok(message.body.reply_markup.inline_keyboard.flat().some((button) => button.callback_data === "menu"));
   } finally {
     globalThis.fetch = originalFetch;
   }

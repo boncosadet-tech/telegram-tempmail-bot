@@ -30,6 +30,7 @@ npx --package telegram-tempmail-bot telegram-tempmail-admin
 Setelah setup, kamu akan punya:
 
 - email sementara di domain sendiri, contoh `hello@domainkamu.com`
+- menu Telegram dengan tombol inline, bukan command-only
 - alias custom dari Telegram, contoh `/new tokopedia`
 - tambah domain lain yang sudah onboard/Active di Cloudflare
 - catch-all email, jadi alamat apa pun di domain bisa diterima
@@ -298,13 +299,39 @@ Kalau `owner-claim` masih pending, buka bot dan kirim:
 
 ## Step 6 — Pakai bot
 
-Command bot:
+UI utama:
+
+```text
+/menu
+```
+
+atau:
+
+```text
+/start
+```
+
+Bot akan menampilkan tombol:
+
+- **➕ Buat email**
+- **🌐 Pilih domain**
+- **📬 Dashboard**
+- **📊 Status**
+- **❔ Bantuan**
+
+Command manual tetap tersedia:
 
 ```text
 /start claim
 ```
 
 Claim owner pertama kali.
+
+```text
+/menu
+```
+
+Tampilkan menu tombol utama.
 
 ```text
 /new
@@ -360,7 +387,7 @@ Cek status bot.
 /help
 ```
 
-Lihat bantuan.
+Lihat bantuan dengan tombol shortcut.
 
 ## Step 7 — Pakai web dashboard private
 

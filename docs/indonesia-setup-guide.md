@@ -27,7 +27,7 @@ npx telegram-tempmail-bot
 
 8. Pilih Setup.
 9. Buka claim link.
-10. Kirim `/new` dan `/web` di bot.
+10. Kirim `/menu` di bot, lalu pakai tombol untuk buat email atau buka dashboard.
 
 ## Tambah domain setelah setup
 
@@ -73,6 +73,7 @@ Untuk usage pribadi, ini cukup. Untuk public tempmail besar, gunakan Paid plan d
 Command Telegram:
 
 ```text
+/menu
 /new
 /new namaalias
 /new namaalias@domainkedua.com
@@ -80,6 +81,14 @@ Command Telegram:
 /status
 /help
 ```
+
+Bot juga punya tombol inline:
+
+- ➕ Buat email
+- 🌐 Pilih domain
+- 📬 Dashboard
+- 📊 Status
+- ❔ Bantuan
 
 Dashboard:
 
