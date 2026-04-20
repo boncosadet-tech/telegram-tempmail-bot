@@ -3,6 +3,7 @@ import 'package:flutter/services.dart' show rootBundle;
 
 import '../../core/models/setup_models.dart';
 import '../../core/validators/input_validators.dart';
+import '../../services/native_actions.dart';
 import '../../services/provisioning_service.dart';
 
 class MobileHomePage extends StatefulWidget {
@@ -23,6 +24,7 @@ class _MobileHomePageState extends State<MobileHomePage> {
 
   bool _saveCredentials = false;
   bool _hideSecrets = true;
+  bool _addingDomain = false;
   int _page = 0;
   List<ProvisioningStep> _steps = const ProvisioningService().initialSteps();
   MobileSetupState? _setupState;
@@ -81,6 +83,50 @@ class _MobileHomePageState extends State<MobileHomePage> {
     _go(3);
   }
 
+
+  Future<void> _openUrl(String url) async {
+    try {
+      await NativeActions.openUrl(url);
+    } on Object catch (error) {
+      _showSnack('Tidak bisa membuka link: $error');
+    }
+  }
+
+  Future<void> _copyText(String text) async {
+    try {
+      await NativeActions.copyText(text);
+      _showSnack('Disalin ke clipboard.');
+    } on Object catch (error) {
+      _showSnack('Tidak bisa copy: $error');
+    }
+  }
+
+  Future<void> _addDomain(String domain, bool force) async {
+    final state = _setupState;
+    if (state == null) {
+      _showSnack('Setup utama belum selesai.');
+      return;
+    }
+    setState(() => _addingDomain = true);
+    try {
+      final next = await _provisioning.addDomain(
+        draft: _draft,
+        state: state,
+        domain: domain,
+        force: force,
+      );
+      if (!mounted) return;
+      setState(() => _setupState = next);
+      _showSnack('Domain ${InputValidators.normalizeDomain(domain)} berhasil ditambahkan.');
+      _go(3);
+    } on Object catch (error) {
+      if (!mounted) return;
+      _showSnack('Add domain gagal: $error');
+    } finally {
+      if (mounted) setState(() => _addingDomain = false);
+    }
+  }
+
   void _showSnack(String message) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
@@ -88,12 +134,16 @@ class _MobileHomePageState extends State<MobileHomePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
+      body: AnimatedContainer(
+        duration: const Duration(milliseconds: 520),
+        curve: Curves.easeOutCubic,
+        decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: <Color>[Color(0xFFFFFBEA), Color(0xFFFFE082), Color(0xFFFFB300)],
+            colors: _page.isEven
+                ? const <Color>[Color(0xFFFFFBEA), Color(0xFFFFE082), Color(0xFFFFB300)]
+                : const <Color>[Color(0xFFFFFBF0), Color(0xFFFFD45A), Color(0xFFFF8A00)],
           ),
         ),
         child: SafeArea(
@@ -124,9 +174,13 @@ class _MobileHomePageState extends State<MobileHomePage> {
                       state: _setupState,
                       onAddDomain: () => _go(4),
                       onReset: () => _go(1),
+                      onOpenUrl: _openUrl,
+                      onCopyText: _copyText,
                     ),
                     _AddDomainStep(
                       primaryDomain: _setupState?.primaryDomain ?? _draft.normalizedDomain,
+                      isRunning: _addingDomain,
+                      onAddDomain: _addDomain,
                       onBack: () => _go(3),
                     ),
                   ],
@@ -185,17 +239,30 @@ class _Card extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.all(18),
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: const Color(0xF0FFFFFF),
-        border: Border.all(color: const Color(0xFF171717), width: 3),
-        borderRadius: BorderRadius.circular(28),
-        boxShadow: const <BoxShadow>[BoxShadow(offset: Offset(8, 8), color: Color(0xFF171717))],
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(begin: .96, end: 1),
+      duration: const Duration(milliseconds: 420),
+      curve: Curves.easeOutBack,
+      builder: (context, value, child) {
+        return Transform.scale(
+          scale: value,
+          child: child,
+        );
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeOutCubic,
+        width: double.infinity,
+        margin: const EdgeInsets.all(18),
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: const Color(0xF0FFFFFF),
+          border: Border.all(color: const Color(0xFF171717), width: 3),
+          borderRadius: BorderRadius.circular(28),
+          boxShadow: const <BoxShadow>[BoxShadow(offset: Offset(8, 8), color: Color(0xFF171717))],
+        ),
+        child: child,
       ),
-      child: child,
     );
   }
 }
@@ -370,21 +437,45 @@ class _StepTile extends StatelessWidget {
       ProvisioningStepStatus.ok => Colors.green,
       ProvisioningStepStatus.failed => Colors.red,
     };
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: Icon(icon, color: color),
-      title: Text(step.title, style: const TextStyle(fontWeight: FontWeight.w800)),
-      subtitle: step.detail.isEmpty ? null : Text(step.detail),
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutCubic,
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: step.status == ProvisioningStepStatus.pending ? .04 : .10),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: color.withValues(alpha: .22)),
+      ),
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+        leading: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 220),
+          child: Icon(icon, key: ValueKey<ProvisioningStepStatus>(step.status), color: color),
+        ),
+        title: Text(step.title, style: const TextStyle(fontWeight: FontWeight.w800)),
+        subtitle: step.detail.isEmpty ? null : Text(step.detail),
+        trailing: step.status == ProvisioningStepStatus.running
+            ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2.4))
+            : null,
+      ),
     );
   }
 }
 
 class _DashboardStep extends StatelessWidget {
-  const _DashboardStep({required this.state, required this.onAddDomain, required this.onReset});
+  const _DashboardStep({
+    required this.state,
+    required this.onAddDomain,
+    required this.onReset,
+    required this.onOpenUrl,
+    required this.onCopyText,
+  });
 
   final MobileSetupState? state;
   final VoidCallback onAddDomain;
   final VoidCallback onReset;
+  final ValueChanged<String> onOpenUrl;
+  final ValueChanged<String> onCopyText;
 
   @override
   Widget build(BuildContext context) {
@@ -407,6 +498,26 @@ class _DashboardStep extends StatelessWidget {
             if (current.botUsername.isNotEmpty) _InfoRow(label: 'Bot', value: '@${current.botUsername}'),
           ],
           const Spacer(),
+          if (current != null) ...<Widget>[
+            FilledButton.icon(
+              onPressed: current.claimLink.isEmpty ? null : () => onOpenUrl(current.claimLink),
+              icon: const Icon(Icons.smart_toy_rounded),
+              label: const Text('Claim di Telegram'),
+            ),
+            const SizedBox(height: 8),
+            FilledButton.tonalIcon(
+              onPressed: () => onOpenUrl(current.dashboardUrl),
+              icon: const Icon(Icons.dashboard_rounded),
+              label: const Text('Buka dashboard'),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: current.claimLink.isEmpty ? null : () => onCopyText(current.claimLink),
+              icon: const Icon(Icons.copy_rounded),
+              label: const Text('Copy claim link'),
+            ),
+            const SizedBox(height: 8),
+          ],
           FilledButton.icon(onPressed: onAddDomain, icon: const Icon(Icons.add_link), label: const Text('Tambah domain')),
           const SizedBox(height: 8),
           OutlinedButton.icon(onPressed: onReset, icon: const Icon(Icons.settings), label: const Text('Edit setup')),
@@ -417,9 +528,16 @@ class _DashboardStep extends StatelessWidget {
 }
 
 class _AddDomainStep extends StatefulWidget {
-  const _AddDomainStep({required this.primaryDomain, required this.onBack});
+  const _AddDomainStep({
+    required this.primaryDomain,
+    required this.isRunning,
+    required this.onAddDomain,
+    required this.onBack,
+  });
 
   final String primaryDomain;
+  final bool isRunning;
+  final void Function(String domain, bool force) onAddDomain;
   final VoidCallback onBack;
 
   @override
@@ -456,15 +574,21 @@ class _AddDomainStepState extends State<_AddDomainStep> {
           ),
           const Spacer(),
           FilledButton.icon(
-            onPressed: () {
+            onPressed: widget.isRunning
+                ? null
+                : () {
               final domain = InputValidators.normalizeDomain(_domainController.text);
               final valid = InputValidators.isDomain(domain);
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text(valid ? 'Next phase: add-domain API untuk $domain' : 'Domain tidak valid')),
-              );
+              if (!valid) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Domain tidak valid')));
+                return;
+              }
+              widget.onAddDomain(domain, _force);
             },
-            icon: const Icon(Icons.play_arrow_rounded),
-            label: const Text('Dry add-domain'),
+            icon: widget.isRunning
+                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2.4))
+                : const Icon(Icons.play_arrow_rounded),
+            label: Text(widget.isRunning ? 'Menambahkan...' : 'Tambah domain sekarang'),
           ),
           const SizedBox(height: 8),
           OutlinedButton(onPressed: widget.onBack, child: const Text('Kembali')),

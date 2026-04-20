@@ -84,4 +84,32 @@ class MobileSetupState {
   final String zoneId;
   final String kvNamespaceId;
   final String d1DatabaseId;
+
+  MobileSetupState copyWith({
+    String? primaryDomain,
+    String? scriptName,
+    String? workerUrl,
+    String? dashboardUrl,
+    String? botUsername,
+    List<String>? domains,
+    String? claimLink,
+    String? accountId,
+    String? zoneId,
+    String? kvNamespaceId,
+    String? d1DatabaseId,
+  }) {
+    return MobileSetupState(
+      primaryDomain: primaryDomain ?? this.primaryDomain,
+      scriptName: scriptName ?? this.scriptName,
+      workerUrl: workerUrl ?? this.workerUrl,
+      dashboardUrl: dashboardUrl ?? this.dashboardUrl,
+      botUsername: botUsername ?? this.botUsername,
+      domains: domains ?? this.domains,
+      claimLink: claimLink ?? this.claimLink,
+      accountId: accountId ?? this.accountId,
+      zoneId: zoneId ?? this.zoneId,
+      kvNamespaceId: kvNamespaceId ?? this.kvNamespaceId,
+      d1DatabaseId: d1DatabaseId ?? this.d1DatabaseId,
+    );
+  }
 }

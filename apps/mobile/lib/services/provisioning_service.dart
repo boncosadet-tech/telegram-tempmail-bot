@@ -208,6 +208,85 @@ class ProvisioningService {
     }
   }
 
+
+  Future<MobileSetupState> addDomain({
+    required SetupDraft draft,
+    required MobileSetupState state,
+    required String domain,
+    bool force = false,
+  }) async {
+    final newDomain = InputValidators.normalizeDomain(domain);
+    if (!InputValidators.isDomain(newDomain)) {
+      throw ProvisioningException('Domain tambahan tidak valid: $domain');
+    }
+    if (state.accountId.isEmpty || state.scriptName.isEmpty) {
+      throw ProvisioningException('Setup state belum lengkap. Jalankan setup utama dulu.');
+    }
+
+    final cf = CloudflareApi(email: draft.cloudflareEmail.trim(), globalApiKey: draft.cloudflareGlobalApiKey.trim());
+    final zone = await cf.getActiveZone(newDomain);
+    final zoneId = zone['id']?.toString() ?? '';
+    final zoneAccountId = (zone['account'] as Map<dynamic, dynamic>?)?['id']?.toString() ?? '';
+    if (zoneId.isEmpty || zoneAccountId.isEmpty) {
+      throw ProvisioningException('Cloudflare zone tambahan tidak punya zone/account id.');
+    }
+    if (zoneAccountId != state.accountId) {
+      throw ProvisioningException('Domain $newDomain ada di akun Cloudflare berbeda. Gunakan akun yang sama dengan ${state.primaryDomain}.');
+    }
+
+    String namespaceId = state.kvNamespaceId;
+    if (namespaceId.isEmpty) {
+      final settings = await cf.getWorkerSettings(state.accountId, state.scriptName);
+      final bindings = settings['bindings'];
+      if (bindings is List<dynamic>) {
+        for (final binding in bindings) {
+          final item = Map<String, dynamic>.from(binding as Map<dynamic, dynamic>);
+          if (item['type'] == 'kv_namespace' && item['name'] == 'STATE_KV') {
+            namespaceId = item['namespace_id']?.toString() ?? '';
+          }
+        }
+      }
+    }
+    if (namespaceId.isEmpty) {
+      throw ProvisioningException('STATE_KV binding tidak ditemukan; tidak bisa menyimpan daftar domain.');
+    }
+
+    final catchAll = await cf.getCatchAllRule(zoneId);
+    final existingTarget = normalizeCatchAllTarget(catchAll);
+    if (existingTarget.isNotEmpty && existingTarget != state.scriptName && !force) {
+      throw ProvisioningException('Catch-all $newDomain sudah mengarah ke Worker "$existingTarget". Aktifkan force hanya untuk domain test/kosong.');
+    }
+
+    await cf.enableEmailRoutingDns(zoneId);
+    await cf.setCatchAllWorker(zoneId, state.scriptName);
+
+    final kvRaw = await cf.getKVValue(state.accountId, namespaceId, 'domains');
+    final domains = <String>{...state.domains.map(InputValidators.normalizeDomain)};
+    if (kvRaw != null && kvRaw.trim().isNotEmpty) {
+      try {
+        final parsed = jsonDecode(kvRaw);
+        if (parsed is List<dynamic>) {
+          for (final value in parsed) {
+            final normalized = InputValidators.normalizeDomain(value.toString());
+            if (normalized.isNotEmpty) domains.add(normalized);
+          }
+        }
+      } on Object {
+        // Keep local state domains if remote KV is malformed.
+      }
+    }
+    domains.add(newDomain);
+    final orderedDomains = domains.where((value) => value.isNotEmpty).toList(growable: false)..sort();
+    orderedDomains.remove(state.primaryDomain);
+    orderedDomains.insert(0, state.primaryDomain);
+    await cf.putKVValue(state.accountId, namespaceId, 'domains', jsonEncode(orderedDomains));
+
+    return state.copyWith(
+      domains: orderedDomains,
+      kvNamespaceId: namespaceId,
+    );
+  }
+
   Stream<List<ProvisioningStep>> dryRunSetup(SetupDraft draft) async* {
     final steps = initialSteps().toList();
     for (var index = 0; index < steps.length; index += 1) {
