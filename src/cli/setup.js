@@ -6,6 +6,7 @@ import { CloudflareClient } from "../lib/cloudflare.js";
 import { TelegramClient } from "../lib/telegram.js";
 import {
   boolInput,
+  normalizeDomainName,
   parseArgs,
   promptConfirm,
   promptInput,
@@ -43,6 +44,7 @@ async function collectSetupInputs(args, cwd) {
     });
   }
 
+  domain = normalizeDomainName(domain);
   requireInput("domain", domain);
   requireInput("cf-email", cfEmail);
   requireInput("cf-global-key", cfGlobalKey);

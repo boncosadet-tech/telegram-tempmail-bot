@@ -20,6 +20,9 @@ function printSavedState(cwd) {
   }
   console.log("Saved state");
   console.log(`Domain: ${state.domain}`);
+  if (Array.isArray(state.domains) && state.domains.length > 0) {
+    console.log(`Domains: ${state.domains.join(", ")}`);
+  }
   console.log(`Script: ${state.scriptName}`);
   console.log(`Worker URL: ${state.workerUrlBase}`);
   console.log(`Bot username: ${state.botUsername}`);
@@ -33,8 +36,9 @@ async function runMenu() {
     console.log("2. Verify");
     console.log("3. Reset owner");
     console.log("4. Rotate secret");
-    console.log("5. Show saved state");
-    console.log("6. Exit");
+    console.log("5. Add domain to existing app");
+    console.log("6. Show saved state");
+    console.log("7. Exit");
     console.log("");
     const choice = await withPrompts((rl) => promptInput(rl, "Choose action", "1"));
     console.log("");
@@ -47,8 +51,10 @@ async function runMenu() {
     } else if (choice === "4") {
       await runAdmin({ action: "rotate-secret" });
     } else if (choice === "5") {
-      printSavedState(cwd);
+      await runAdmin({ action: "add-domain" });
     } else if (choice === "6") {
+      printSavedState(cwd);
+    } else if (choice === "7") {
       console.log("Bye.");
       return;
     } else {

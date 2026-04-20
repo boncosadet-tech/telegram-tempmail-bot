@@ -286,6 +286,89 @@ test("new command generates readable default alias", async () => {
   }
 });
 
+test("new command can create an alias on an added configured domain", async () => {
+  const owner = {
+    userId: "6083649512",
+    chatId: "6083649512",
+    claimedAt: "2026-04-19T00:00:00.000Z",
+    domain: "example.com"
+  };
+  const env = createEnv(owner, {
+    STATE_KV: new MockKV({
+      owner: JSON.stringify(owner),
+      domains: JSON.stringify(["example.com", "second.example"])
+    })
+  });
+  const sentMessages = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, init) => {
+    sentMessages.push(JSON.parse(init.body));
+    return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  try {
+    const response = await worker.fetch(
+      new Request("https://worker.example/tg/secret-token", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "X-Telegram-Bot-Api-Secret-Token": "secret-token"
+        },
+        body: JSON.stringify(createTelegramUpdate("/new billing@second.example", { userId: 6083649512, chatId: 6083649512 }))
+      }),
+      env
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(sentMessages.length, 1);
+    assert.match(sentMessages[0].text, /billing@second\.example/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("new command rejects domains not configured on the app", async () => {
+  const owner = {
+    userId: "6083649512",
+    chatId: "6083649512",
+    claimedAt: "2026-04-19T00:00:00.000Z",
+    domain: "example.com"
+  };
+  const env = createEnv(owner, {
+    STATE_KV: new MockKV({
+      owner: JSON.stringify(owner),
+      domains: JSON.stringify(["example.com"])
+    })
+  });
+  const sentMessages = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, init) => {
+    sentMessages.push(JSON.parse(init.body));
+    return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  try {
+    const response = await worker.fetch(
+      new Request("https://worker.example/tg/secret-token", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "X-Telegram-Bot-Api-Secret-Token": "secret-token"
+        },
+        body: JSON.stringify(createTelegramUpdate("/new billing@not-added.example", { userId: 6083649512, chatId: 6083649512 }))
+      }),
+      env
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(sentMessages.length, 1);
+    assert.match(sentMessages[0].text, /Domain is not configured/);
+    assert.match(sentMessages[0].text, /example\.com/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("email handler forwards summary to claimed owner chat", async () => {
   const env = createEnv({
     userId: "6083649512",

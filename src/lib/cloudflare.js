@@ -182,6 +182,27 @@ export class CloudflareClient {
     return res.text();
   }
 
+  async putKVValue(accountId, namespaceId, keyName, value) {
+    const res = await fetch(
+      `${this.baseUrl}/accounts/${accountId}/storage/kv/namespaces/${namespaceId}/values/${encodeURIComponent(keyName)}`,
+      {
+        method: "PUT",
+        headers: this.headers({ "Content-Type": "text/plain; charset=utf-8" }),
+        body: String(value)
+      }
+    );
+    const text = await res.text();
+    let data = {};
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch (_error) {
+      data = {};
+    }
+    if (!res.ok || data.success === false) {
+      throw new Error(`Cloudflare KV PUT failed (${res.status}): ${text}`);
+    }
+  }
+
   async deleteKVValue(accountId, namespaceId, keyName) {
     const res = await fetch(
       `${this.baseUrl}/accounts/${accountId}/storage/kv/namespaces/${namespaceId}/values/${encodeURIComponent(keyName)}`,

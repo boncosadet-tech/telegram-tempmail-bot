@@ -30,6 +30,16 @@ export function readInput(args, key, envName, fallback = "") {
   return (args[key] || process.env[envName] || fallback).trim();
 }
 
+export function normalizeDomainName(input) {
+  return String(input || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .split(/[/?#]/)[0]
+    .replace(/^@+/, "")
+    .replace(/\.+$/g, "");
+}
+
 export function requireInput(name, value) {
   if (!value) {
     throw new Error(`Missing required input: ${name}`);

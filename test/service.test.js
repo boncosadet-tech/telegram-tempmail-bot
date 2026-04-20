@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { performSetup, performVerify, resetOwner, rotateWebhookSecret } from "../src/lib/service.js";
+import { addDomainToApp, performSetup, performVerify, resetOwner, rotateWebhookSecret } from "../src/lib/service.js";
 
 function createTempRepo() {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "tempmail-bot-"));
@@ -22,7 +22,8 @@ function createCloudflareMock() {
     d1Queries: [],
     catchAllTarget: "",
     enabledDns: 0,
-    deletedKeys: []
+    deletedKeys: [],
+    kvValues: {}
   };
   return {
     state,
@@ -73,8 +74,12 @@ function createCloudflareMock() {
       state.d1Queries.push(sql);
       return [{ success: true, results: [{ ok: 1 }] }];
     },
-    async getKVValue() {
-      return state.owner;
+    async getKVValue(_accountId, _namespaceId, key) {
+      if (key === "owner") return state.owner;
+      return state.kvValues[key] || null;
+    },
+    async putKVValue(_accountId, _namespaceId, key, value) {
+      state.kvValues[key] = value;
     },
     async deleteKVValue(_accountId, _namespaceId, key) {
       state.deletedKeys.push(key);
@@ -123,6 +128,38 @@ test("performSetup writes state and configures catch-all/webhook", async () => {
   const saved = JSON.parse(fs.readFileSync(path.join(cwd, ".tempmail/setup-state.json"), "utf8"));
   assert.equal(saved.scriptName, "telegram-tempmail-example-com");
   assert.equal(saved.d1DatabaseId, "d1-1");
+  assert.deepEqual(JSON.parse(cf.state.kvValues.domains), ["example.com"]);
+});
+
+test("addDomainToApp configures an onboarded Cloudflare domain on existing worker", async () => {
+  const cwd = createTempRepo();
+  fs.mkdirSync(path.join(cwd, ".tempmail"), { recursive: true });
+  fs.writeFileSync(
+    path.join(cwd, ".tempmail/setup-state.json"),
+    JSON.stringify({
+      domain: "example.com",
+      domains: ["example.com"],
+      accountId: "acct-1",
+      scriptName: "telegram-tempmail-example-com"
+    }),
+    "utf8"
+  );
+  const cf = createCloudflareMock();
+  const result = await addDomainToApp({
+    cf,
+    domain: "Second.Example",
+    scriptName: "",
+    cwd,
+    onProgress() {}
+  });
+
+  assert.equal(result.domain, "second.example");
+  assert.equal(cf.state.enabledDns, 1);
+  assert.equal(cf.state.catchAllTarget, "telegram-tempmail-example-com");
+  assert.deepEqual(JSON.parse(cf.state.kvValues.domains), ["example.com", "second.example"]);
+  const saved = JSON.parse(fs.readFileSync(path.join(cwd, ".tempmail/setup-state.json"), "utf8"));
+  assert.deepEqual(saved.domains, ["example.com", "second.example"]);
+  assert.equal(saved.domainZones["second.example"], "zone-1");
 });
 
 test("performVerify reports ok with mocked clients", async () => {
@@ -146,6 +183,24 @@ test("performVerify reports ok with mocked clients", async () => {
 
   assert.equal(result.ok, true);
   assert.ok(statuses.some((item) => item.name === "verify" && item.status === "ok"));
+});
+
+test("performVerify accepts an added domain listed in app KV", async () => {
+  const cf = createCloudflareMock();
+  cf.state.catchAllTarget = "telegram-tempmail-example-com";
+  cf.state.kvValues.domains = JSON.stringify(["example.com", "second.example"]);
+  const statuses = [];
+  const result = await performVerify({
+    cf,
+    domain: "second.example",
+    scriptName: "telegram-tempmail-example-com",
+    onStatus(name, status, detail) {
+      statuses.push({ name, status, detail });
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.ok(statuses.some((item) => item.name === "binding DOMAIN" && item.detail.includes("in domains KV")));
 });
 
 test("resetOwner deletes owner key from KV", async () => {

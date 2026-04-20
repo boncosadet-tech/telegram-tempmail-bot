@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { CloudflareClient } from "../lib/cloudflare.js";
 import { TelegramClient } from "../lib/telegram.js";
 import {
+  normalizeDomainName,
   parseArgs,
   promptInput,
   readInput,
@@ -39,6 +40,7 @@ async function collectVerifyInputs(args, cwd) {
     });
   }
 
+  domain = normalizeDomainName(domain);
   requireInput("domain", domain);
   requireInput("cf-email", cfEmail);
   requireInput("cf-global-key", cfGlobalKey);

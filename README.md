@@ -31,6 +31,7 @@ Setelah setup, kamu akan punya:
 
 - email sementara di domain sendiri, contoh `hello@domainkamu.com`
 - alias custom dari Telegram, contoh `/new tokopedia`
+- tambah domain lain yang sudah onboard/Active di Cloudflare
 - catch-all email, jadi alamat apa pun di domain bisa diterima
 - notifikasi email masuk ke Telegram
 - OTP/code extraction otomatis
@@ -329,7 +330,19 @@ tokopedia@domainkamu.com
 /new hello.team@domainkamu.com
 ```
 
-Input full email juga diterima; yang dipakai local-part-nya.
+Input full email juga diterima. Kalau domain tersebut sudah ditambahkan ke app, bot akan membuat alamat di domain itu.
+
+Contoh setelah kamu menambahkan domain kedua:
+
+```text
+/new billing@domainkedua.com
+```
+
+Hasil:
+
+```text
+billing@domainkedua.com
+```
 
 ```text
 /web
@@ -400,6 +413,40 @@ Jika email belum muncul:
 - pastikan catch-all mengarah ke Worker
 
 ## Admin command
+
+Tambah domain yang sudah onboard/Active di Cloudflare ke app yang sama:
+
+```bash
+npx --package telegram-tempmail-bot telegram-tempmail-admin \
+  --action add-domain \
+  --domain domainkedua.com \
+  --cf-email email-login-cloudflare@example.com \
+  --cf-global-key <GLOBAL_API_KEY> \
+  --script-name telegram-tempmail
+```
+
+Yang dilakukan command ini:
+
+- memastikan domain sudah Active di Cloudflare
+- mengaktifkan Email Routing DNS domain baru
+- memasang catch-all domain baru ke Worker yang sama
+- menyimpan daftar domain ke KV app
+
+Verifikasi domain tambahan:
+
+```bash
+npx --package telegram-tempmail-bot telegram-tempmail-verify \
+  --domain domainkedua.com \
+  --cf-email email-login-cloudflare@example.com \
+  --cf-global-key <GLOBAL_API_KEY> \
+  --script-name telegram-tempmail
+```
+
+Catatan:
+
+- domain baru harus berada di akun Cloudflare yang sama dengan Worker
+- gunakan `--force` hanya kalau kamu memang ingin mengganti catch-all lama di domain baru
+- setelah berhasil, kamu bisa pakai `/new alias@domainkedua.com`
 
 Reset owner:
 

@@ -2,6 +2,7 @@ import path from "node:path";
 
 import {
   defaultWorkerNameForDomain,
+  normalizeDomainName,
   randomToken,
   readJsonFile,
   readTextFile,
@@ -10,6 +11,7 @@ import {
 } from "./common.js";
 
 export const OWNER_KEY = "owner";
+export const DOMAINS_KEY = "domains";
 const D1_BINDING_NAME = "MAIL_DB";
 const D1_DB_PREFIX = "telegram-tempmail";
 const D1_SCHEMA_STATEMENTS = [
@@ -61,6 +63,35 @@ export function readSavedState(cwd) {
   return readJsonFile(statePathFor(cwd), {});
 }
 
+function uniqueDomains(values) {
+  const seen = new Set();
+  const domains = [];
+  for (const value of values) {
+    const domain = normalizeDomainName(value);
+    if (!domain || seen.has(domain)) continue;
+    seen.add(domain);
+    domains.push(domain);
+  }
+  return domains;
+}
+
+function parseDomainsValue(raw) {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return uniqueDomains(parsed);
+    if (Array.isArray(parsed?.domains)) return uniqueDomains(parsed.domains);
+  } catch (_error) {
+    return [];
+  }
+  return [];
+}
+
+async function writeDomainsToKV(cf, accountId, namespaceId, domains) {
+  if (!namespaceId || typeof cf.putKVValue !== "function") return;
+  await cf.putKVValue(accountId, namespaceId, DOMAINS_KEY, JSON.stringify(uniqueDomains(domains)));
+}
+
 async function applyD1Migrations(cf, accountId, databaseId) {
   for (const statement of D1_SCHEMA_STATEMENTS) {
     await cf.queryD1(accountId, databaseId, statement);
@@ -85,6 +116,7 @@ export async function performSetup({
   dryRun = false,
   onProgress = () => {}
 }) {
+  domain = normalizeDomainName(domain);
   const kvTitle = `telegram-tempmail:${domain}`;
   const webhookSecret = randomToken(36);
   const claimToken = "claim";
@@ -148,6 +180,9 @@ export async function performSetup({
   await cf.setWorkerSecret(accountId, scriptName, "BOT_TOKEN", telegramBotToken);
   await cf.setWorkerSecret(accountId, scriptName, "WEBHOOK_SECRET", webhookSecret);
 
+  onProgress("saving configured domain list");
+  await writeDomainsToKV(cf, accountId, kvNamespace.id, [domain]);
+
   onProgress("enabling workers.dev endpoint");
   await cf.enableWorkerSubdomain(accountId, scriptName);
 
@@ -172,6 +207,8 @@ export async function performSetup({
     version: 1,
     createdAt: new Date().toISOString(),
     domain,
+    domains: [domain],
+    domainZones: { [domain]: zone.id },
     zoneId: zone.id,
     accountId,
     scriptName,
@@ -209,6 +246,7 @@ export async function performVerify({
   scriptName,
   onStatus = () => {}
 }) {
+  domain = normalizeDomainName(domain);
   const failures = [];
 
   const zone = await cf.getZoneByDomain(domain);
@@ -227,15 +265,25 @@ export async function performVerify({
     return null;
   });
   let kvBinding = null;
+  let configuredDomains = [];
   if (workerSettings) {
     const bindings = workerSettings.bindings || [];
     const domainBinding = bindings.find((b) => b.type === "plain_text" && b.name === "DOMAIN");
     kvBinding = bindings.find((b) => b.type === "kv_namespace" && b.name === "STATE_KV");
     const d1Binding = bindings.find((b) => b.type === "d1" && b.name === D1_BINDING_NAME);
-    if (!domainBinding || domainBinding.text !== domain) {
+    if (kvBinding?.namespace_id) {
+      configuredDomains = parseDomainsValue(await cf.getKVValue(accountId, kvBinding.namespace_id, DOMAINS_KEY));
+    }
+    if (!domainBinding) {
+      failures.push("DOMAIN binding is missing or mismatched");
+    } else if (domainBinding.text !== domain && !configuredDomains.includes(domain)) {
       failures.push("DOMAIN binding is missing or mismatched");
     } else {
-      onStatus("binding DOMAIN", "ok", domainBinding.text);
+      onStatus(
+        "binding DOMAIN",
+        "ok",
+        domainBinding.text === domain ? domainBinding.text : `${domainBinding.text} primary; ${domain} in domains KV`
+      );
     }
     if (!kvBinding || !kvBinding.namespace_id) {
       failures.push("STATE_KV binding is missing");
@@ -314,6 +362,96 @@ export async function performVerify({
   }
   onStatus("verify", "ok", "all critical checks passed");
   return { ok: true, failures: [] };
+}
+
+export async function addDomainToApp({
+  cf,
+  domain,
+  scriptName,
+  cwd,
+  force = false,
+  onProgress = () => {}
+}) {
+  const saved = readSavedState(cwd);
+  const newDomain = normalizeDomainName(domain);
+  if (!newDomain) {
+    throw new Error("Missing required input: domain");
+  }
+  const effectiveScriptName = scriptName || saved.scriptName;
+  if (!effectiveScriptName) {
+    throw new Error("Worker script name is required. Run setup first or pass --script-name.");
+  }
+
+  onProgress(`resolving active Cloudflare zone for ${newDomain}`);
+  const zone = await cf.getZoneByDomain(newDomain);
+  const accountId = saved.accountId || zone.account?.id;
+  if (!accountId) {
+    throw new Error("Cloudflare zone has no account id.");
+  }
+  if (zone.account?.id && zone.account.id !== accountId) {
+    throw new Error(
+      `Domain ${newDomain} belongs to account ${zone.account.id}, but the saved app uses account ${accountId}.`
+    );
+  }
+
+  onProgress(`loading worker settings for ${effectiveScriptName}`);
+  const workerSettings = await cf.getWorkerSettings(accountId, effectiveScriptName);
+  const bindings = workerSettings.bindings || [];
+  const domainBinding = bindings.find((b) => b.type === "plain_text" && b.name === "DOMAIN");
+  const kvBinding = bindings.find((b) => b.type === "kv_namespace" && b.name === "STATE_KV");
+  if (!kvBinding?.namespace_id) {
+    throw new Error("STATE_KV binding is missing; cannot update app domain list.");
+  }
+
+  onProgress("enabling email routing DNS for new domain (idempotent)");
+  await cf.enableEmailRoutingDns(zone.id);
+
+  onProgress("checking new domain catch-all rule");
+  const catchAll = await cf.getCatchAllRule(zone.id);
+  const existingTarget = normalizeCatchAllTarget(catchAll);
+  if (existingTarget && existingTarget !== effectiveScriptName && !force) {
+    throw new Error(
+      `Catch-all for ${newDomain} currently points to worker "${existingTarget}". Re-run with --force to replace it.`
+    );
+  }
+  await cf.setCatchAllWorker(zone.id, effectiveScriptName);
+
+  const currentDomains = parseDomainsValue(await cf.getKVValue(accountId, kvBinding.namespace_id, DOMAINS_KEY));
+  const domains = uniqueDomains([
+    domainBinding?.text,
+    saved.domain,
+    ...(Array.isArray(saved.domains) ? saved.domains : []),
+    ...currentDomains,
+    newDomain
+  ]);
+
+  onProgress("saving updated app domain list");
+  await writeDomainsToKV(cf, accountId, kvBinding.namespace_id, domains);
+
+  const statePath = statePathFor(cwd);
+  const stateData = {
+    ...saved,
+    version: 1,
+    domain: normalizeDomainName(saved.domain || domainBinding?.text || domains[0] || newDomain),
+    domains,
+    domainZones: {
+      ...(saved.domainZones || {}),
+      [newDomain]: zone.id
+    },
+    accountId,
+    scriptName: effectiveScriptName
+  };
+  writeJsonFile(statePath, stateData);
+
+  return {
+    domain: newDomain,
+    domains,
+    zoneId: zone.id,
+    accountId,
+    scriptName: effectiveScriptName,
+    namespaceId: kvBinding.namespace_id,
+    statePath
+  };
 }
 
 export async function resetOwner({

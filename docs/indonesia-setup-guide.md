@@ -29,6 +29,27 @@ npx telegram-tempmail-bot
 9. Buka claim link.
 10. Kirim `/new` dan `/web` di bot.
 
+## Tambah domain setelah setup
+
+Kalau domain kedua sudah ditambahkan ke Cloudflare dan statusnya **Active**, jalankan:
+
+```bash
+npx --package telegram-tempmail-bot telegram-tempmail-admin \
+  --action add-domain \
+  --domain domainkedua.com \
+  --cf-email email-login-cloudflare@example.com \
+  --cf-global-key <GLOBAL_API_KEY> \
+  --script-name telegram-tempmail
+```
+
+Setelah berhasil, bot bisa membuat alamat di domain itu:
+
+```text
+/new billing@domainkedua.com
+```
+
+Domain baru harus berada di akun Cloudflare yang sama dengan Worker/app utama.
+
 ## Kenapa Free plan bisa?
 
 Karena project ini memakai fitur Cloudflare yang tersedia untuk pemakaian gratis/ringan:
@@ -54,6 +75,7 @@ Command Telegram:
 ```text
 /new
 /new namaalias
+/new namaalias@domainkedua.com
 /web
 /status
 /help

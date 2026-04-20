@@ -1,5 +1,6 @@
 const VERSION = "2026-04-19-telegram-tempmail-v3";
 const OWNER_KEY = "owner";
+const DOMAINS_KEY = "domains";
 const LOGIN_PREFIX = "login:";
 const SESSION_PREFIX = "session:";
 const SESSION_COOKIE = "tt_session";
@@ -112,14 +113,54 @@ function sanitizeRequestedLocal(input) {
   return sanitized;
 }
 
+function normalizeDomainName(input) {
+  return String(input || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .split(/[/?#]/)[0]
+    .replace(/^@+/, "")
+    .replace(/\.+$/g, "");
+}
+
+function formatDomainList(domains) {
+  return domains.length > 0 ? domains.join(", ") : "-";
+}
+
+async function getConfiguredDomains(env) {
+  const domains = [];
+  const add = (value) => {
+    const domain = normalizeDomainName(value);
+    if (domain && !domains.includes(domain)) domains.push(domain);
+  };
+  add(env.DOMAIN || "example.com");
+  if (env.STATE_KV) {
+    const raw = await env.STATE_KV.get(DOMAINS_KEY).catch(() => null);
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        const values = Array.isArray(parsed) ? parsed : parsed?.domains;
+        if (Array.isArray(values)) {
+          for (const value of values) add(value);
+        }
+      } catch (_error) {
+        // Ignore malformed optional domain list and keep the primary DOMAIN binding.
+      }
+    }
+  }
+  return domains;
+}
+
 function parseNewAlias(text) {
   const parts = String(text || "").trim().split(/\s+/).slice(1);
-  if (parts.length === 0) return { local: generateReadableLocal(), custom: false };
-  const requested = sanitizeRequestedLocal(parts.join("-"));
+  if (parts.length === 0) return { local: generateReadableLocal(), domain: "", custom: false };
+  const raw = parts.join("-").trim().toLowerCase();
+  const requestedDomain = raw.includes("@") ? normalizeDomainName(raw.split("@").slice(1).join("@")) : "";
+  const requested = sanitizeRequestedLocal(raw);
   if (!requested) {
-    return { local: "", custom: true, error: "Custom alias only supports letters, numbers, dot, dash, and underscore." };
+    return { local: "", domain: requestedDomain, custom: true, error: "Custom alias only supports letters, numbers, dot, dash, and underscore." };
   }
-  return { local: requested, custom: true };
+  return { local: requested, domain: requestedDomain, custom: true };
 }
 
 function cleanText(s) {
@@ -344,10 +385,11 @@ function parseStartToken(text) {
   return parts.length > 1 ? parts[1] : "";
 }
 
-function ownerStatusText(domain, owner) {
-  if (!owner) return `Domain: ${domain}\nOwner: not claimed`;
+function ownerStatusText(domain, owner, domains = [domain]) {
+  const domainLines = [`Primary domain: ${domain}`, `Domains: ${formatDomainList(domains)}`];
+  if (!owner) return `${domainLines.join("\n")}\nOwner: not claimed`;
   return [
-    `Domain: ${domain}`,
+    ...domainLines,
     `Owner user id: ${owner.userId}`,
     `Owner chat id: ${owner.chatId}`,
     `Claimed at: ${owner.claimedAt || "-"}`
@@ -732,6 +774,7 @@ function renderAppPage(domain) {
         <h3>Create alias</h3>
         <div class="muted">Kosongkan untuk alias readable otomatis.</div>
         <input id="aliasInput" placeholder="hello atau hello.team" />
+        <select id="aliasDomainSelect"></select>
         <button class="primary" id="createAliasBtn">Create alias</button>
         <div id="aliasResult" class="muted"></div>
       </div>
@@ -810,8 +853,16 @@ function renderAppPage(domain) {
     async function loadAliases() {
       const data = await api('/api/aliases');
       const select = document.getElementById('aliasFilter');
+      const domainSelect = document.getElementById('aliasDomainSelect');
       const current = select.value;
       select.innerHTML = '<option value="">All aliases</option>';
+      domainSelect.innerHTML = '';
+      for (const domain of data.domains || [data.domain]) {
+        const option = document.createElement('option');
+        option.value = domain;
+        option.textContent = '@' + domain;
+        domainSelect.appendChild(option);
+      }
       for (const alias of data.aliases) {
         const option = document.createElement('option');
         option.value = alias.alias_local;
@@ -868,7 +919,8 @@ function renderAppPage(domain) {
     document.getElementById('aliasFilter').onchange = async () => { await loadMessages(); };
     document.getElementById('createAliasBtn').onclick = async () => {
       const alias = document.getElementById('aliasInput').value;
-      const data = await api('/api/aliases', { method: 'POST', body: JSON.stringify({ alias }) });
+      const domain = document.getElementById('aliasDomainSelect').value;
+      const data = await api('/api/aliases', { method: 'POST', body: JSON.stringify({ alias, domain }) });
       document.getElementById('aliasResult').textContent = data.address;
       document.getElementById('aliasInput').value = '';
       await loadAliases();
@@ -951,9 +1003,11 @@ async function handleApi(request, env) {
   const pathname = url.pathname;
 
   if (pathname === "/api/session" && method === "GET") {
+    const domains = await getConfiguredDomains(env);
     return json({
       ok: true,
-      domain: env.DOMAIN,
+      domain: domains[0] || env.DOMAIN,
+      domains,
       owner: auth.owner,
       hasMailDb: true
     });
@@ -989,18 +1043,24 @@ async function handleApi(request, env) {
   }
 
   if (pathname === "/api/aliases" && method === "GET") {
+    const domains = await getConfiguredDomains(env);
     const aliases = await listAliases(env);
-    return json({ ok: true, domain: env.DOMAIN, aliases });
+    return json({ ok: true, domain: domains[0] || env.DOMAIN, domains, aliases });
   }
 
   if (pathname === "/api/aliases" && method === "POST") {
+    const domains = await getConfiguredDomains(env);
     const body = await parseJsonBody(request);
     const local = body.alias ? sanitizeRequestedLocal(body.alias) : generateReadableLocal();
+    const requestedDomain = normalizeDomainName(body.domain || domains[0] || env.DOMAIN);
     if (!local) {
       return json({ ok: false, error: "invalid alias" }, { status: 400 });
     }
+    if (!domains.includes(requestedDomain)) {
+      return json({ ok: false, error: "domain is not configured" }, { status: 400 });
+    }
     await upsertAlias(env, local, "web");
-    return json({ ok: true, address: `${local}@${env.DOMAIN}` });
+    return json({ ok: true, address: `${local}@${requestedDomain}` });
   }
 
   return json({ ok: false, error: "not found" }, { status: 404 });
@@ -1021,7 +1081,8 @@ async function handleTelegram(request, env) {
   const msg = update.message || update.edited_message || null;
   if (!msg) return new Response("ok", { status: 200 });
 
-  const domain = env.DOMAIN || "example.com";
+  const domains = await getConfiguredDomains(env);
+  const domain = domains[0] || env.DOMAIN || "example.com";
   const replyChatId = msg.chat?.id || msg.from?.id;
   if (!replyChatId) return new Response("ok", { status: 200 });
 
@@ -1046,14 +1107,14 @@ async function handleTelegram(request, env) {
         domain
       };
       await setOwner(env, claimedOwner);
-      await sendTelegram(env, replyChatId, `Owner claimed successfully.\n\n${ownerStatusText(domain, claimedOwner)}`);
+      await sendTelegram(env, replyChatId, `Owner claimed successfully.\n\n${ownerStatusText(domain, claimedOwner, domains)}`);
       return new Response("ok", { status: 200 });
     }
     if (!isOwnerMessage(msg, owner)) {
       await sendTelegram(env, replyChatId, "This bot is already claimed by another owner.");
       return new Response("ok", { status: 200 });
     }
-    await sendTelegram(env, replyChatId, `TempMail bot is active.\n\n${ownerStatusText(domain, owner)}`);
+    await sendTelegram(env, replyChatId, `TempMail bot is active.\n\n${ownerStatusText(domain, owner, domains)}`);
     return new Response("ok", { status: 200 });
   }
 
@@ -1069,6 +1130,7 @@ async function handleTelegram(request, env) {
 
   if (text.startsWith("/new")) {
     const alias = parseNewAlias(text);
+    const targetDomain = alias.domain || domain;
     if (alias.error) {
       await sendTelegram(
         env,
@@ -1077,7 +1139,15 @@ async function handleTelegram(request, env) {
       );
       return new Response("ok", { status: 200 });
     }
-    const addr = `${alias.local}@${domain}`;
+    if (!domains.includes(targetDomain)) {
+      await sendTelegram(
+        env,
+        replyChatId,
+        `Domain is not configured for this app: ${targetDomain}\n\nConfigured domains:\n${formatDomainList(domains)}`
+      );
+      return new Response("ok", { status: 200 });
+    }
+    const addr = `${alias.local}@${targetDomain}`;
     if (hasMailDb(env)) await upsertAlias(env, alias.local, "bot");
     await sendTelegram(
       env,
@@ -1099,14 +1169,14 @@ async function handleTelegram(request, env) {
       `Dashboard login link:\n\n${origin}/auth/telegram?token=${loginToken}\n\nThis link expires in 10 minutes.`
     );
   } else if (text.startsWith("/status")) {
-    await sendTelegram(env, replyChatId, `${ownerStatusText(domain, owner)}\nDashboard: ${new URL(request.url).origin}/app`);
+    await sendTelegram(env, replyChatId, `${ownerStatusText(domain, owner, domains)}\nDashboard: ${new URL(request.url).origin}/app`);
   } else if (text.startsWith("/whoami")) {
     await sendTelegram(env, replyChatId, `User ID: ${msg.from?.id}\nChat ID: ${msg.chat?.id}`);
   } else if (text.startsWith("/help") || !text) {
     await sendTelegram(
       env,
       replyChatId,
-      `Commands:\n/start claim - claim owner (first use)\n/start - bot status\n/new - create a readable temp email\n/new hello - create custom alias\n/web - get dashboard login link\n/status - show runtime status\n/whoami - show your ids\n/help - help`
+      `Commands:\n/start claim - claim owner (first use)\n/start - bot status\n/new - create a readable temp email\n/new hello - create custom alias\n/new hello@domain.com - create alias on a configured domain\n/web - get dashboard login link\n/status - show runtime status\n/whoami - show your ids\n/help - help`
     );
   } else {
     await sendTelegram(env, replyChatId, "Unknown command. Use /help.");
@@ -1119,11 +1189,13 @@ export default {
     const url = new URL(request.url);
     if (url.pathname === "/health") {
       const owner = env.STATE_KV ? await getOwner(env) : null;
+      const domains = await getConfiguredDomains(env);
       return Response.json({
         ok: true,
         service: "telegram-tempmail",
         version: VERSION,
-        domain: env.DOMAIN,
+        domain: domains[0] || env.DOMAIN,
+        domains,
         ownerClaimed: Boolean(owner),
         dashboardEnabled: hasMailDb(env)
       });
