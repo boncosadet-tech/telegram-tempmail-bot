@@ -38,7 +38,11 @@ class TelegramApi {
       if (response.statusCode < 200 || response.statusCode >= 300 || data['ok'] == false) {
         throw TelegramApiException('Telegram API gagal (${response.statusCode}): $raw');
       }
-      return Map<String, dynamic>.from(data['result'] as Map<dynamic, dynamic>);
+      final result = data['result'];
+      if (result is Map<dynamic, dynamic>) {
+        return Map<String, dynamic>.from(result);
+      }
+      return <String, dynamic>{'value': result};
     } finally {
       client.close(force: true);
     }

@@ -1,7 +1,41 @@
+import 'dart:convert';
+import 'dart:math';
+
 import '../core/models/setup_models.dart';
+import '../core/validators/input_validators.dart';
+import 'cloudflare_api.dart';
+import 'telegram_api.dart';
 
 class ProvisioningService {
   const ProvisioningService();
+
+  static const List<String> _d1SchemaStatements = <String>[
+    '''CREATE TABLE IF NOT EXISTS messages (
+    id TEXT PRIMARY KEY,
+    alias_local TEXT NOT NULL,
+    alias_full TEXT NOT NULL,
+    sender TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    preview_text TEXT NOT NULL,
+    rendered_html TEXT NOT NULL DEFAULT '',
+    otp_code TEXT NOT NULL DEFAULT '-',
+    is_otp INTEGER NOT NULL DEFAULT 0,
+    size_kb INTEGER NOT NULL DEFAULT 0,
+    raw_kind TEXT NOT NULL DEFAULT 'unknown',
+    received_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+  )''',
+    'CREATE INDEX IF NOT EXISTS idx_messages_received_at ON messages (received_at DESC)',
+    'CREATE INDEX IF NOT EXISTS idx_messages_alias_local ON messages (alias_local, received_at DESC)',
+    'CREATE INDEX IF NOT EXISTS idx_messages_expires_at ON messages (expires_at)',
+    '''CREATE TABLE IF NOT EXISTS aliases (
+    alias_local TEXT PRIMARY KEY,
+    source TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    last_seen_at INTEGER NOT NULL,
+    is_pinned INTEGER NOT NULL DEFAULT 0
+  )''',
+  ];
 
   List<ProvisioningStep> initialSteps() {
     return const <ProvisioningStep>[
@@ -17,6 +51,161 @@ class ProvisioningService {
       ProvisioningStep(id: 'catchall', title: 'Set catch-all Worker route'),
       ProvisioningStep(id: 'webhook', title: 'Configure Telegram webhook'),
     ];
+  }
+
+  Stream<ProvisioningUpdate> runSetup(SetupDraft draft, {required String workerSource}) async* {
+    var steps = initialSteps();
+    String currentStep = 'telegram';
+    String? accountId;
+    String? zoneId;
+    String? accountSubdomain;
+    String? kvNamespaceId;
+    String? d1DatabaseId;
+    String botUsername = '';
+
+    final domain = draft.normalizedDomain;
+    final scriptName = draft.effectiveScriptName;
+    final cf = CloudflareApi(email: draft.cloudflareEmail.trim(), globalApiKey: draft.cloudflareGlobalApiKey.trim());
+    final tg = TelegramApi(draft.telegramBotToken.trim());
+    final webhookSecret = _randomToken(36);
+
+    try {
+      currentStep = 'telegram';
+      steps = _setStep(steps, currentStep, ProvisioningStepStatus.running, 'Checking bot token');
+      yield ProvisioningUpdate(steps: steps);
+      final bot = await tg.getMe();
+      botUsername = bot['username']?.toString() ?? '';
+      if (botUsername.isEmpty) {
+        throw ProvisioningException('Telegram bot harus punya username sebelum setup.');
+      }
+      steps = _setStep(steps, currentStep, ProvisioningStepStatus.ok, '@$botUsername');
+      yield ProvisioningUpdate(steps: steps);
+
+      currentStep = 'zone';
+      steps = _setStep(steps, currentStep, ProvisioningStepStatus.running, domain);
+      yield ProvisioningUpdate(steps: steps);
+      final zone = await cf.getActiveZone(domain);
+      zoneId = zone['id']?.toString();
+      accountId = (zone['account'] as Map<dynamic, dynamic>?)?['id']?.toString();
+      if (zoneId == null || zoneId.isEmpty || accountId == null || accountId.isEmpty) {
+        throw ProvisioningException('Cloudflare zone tidak punya zone/account id.');
+      }
+      accountSubdomain = await cf.getAccountWorkersSubdomain(accountId);
+      steps = _setStep(steps, currentStep, ProvisioningStepStatus.ok, '${zone['name']} ($zoneId)');
+      yield ProvisioningUpdate(steps: steps);
+
+      currentStep = 'kv';
+      steps = _setStep(steps, currentStep, ProvisioningStepStatus.running, 'telegram-tempmail:$domain');
+      yield ProvisioningUpdate(steps: steps);
+      final kv = await cf.findOrCreateKVNamespace(accountId, 'telegram-tempmail:$domain');
+      kvNamespaceId = kv['id']?.toString();
+      if (kvNamespaceId == null || kvNamespaceId.isEmpty) {
+        throw ProvisioningException('KV namespace id kosong.');
+      }
+      steps = _setStep(steps, currentStep, ProvisioningStepStatus.ok, kvNamespaceId);
+      yield ProvisioningUpdate(steps: steps);
+
+      currentStep = 'd1';
+      final d1Name = InputValidators.normalizeScriptName('telegram-tempmail-$domain', domain);
+      steps = _setStep(steps, currentStep, ProvisioningStepStatus.running, d1Name);
+      yield ProvisioningUpdate(steps: steps);
+      final d1 = await cf.findOrCreateD1Database(accountId, d1Name);
+      d1DatabaseId = (d1['uuid'] ?? d1['id'])?.toString();
+      if (d1DatabaseId == null || d1DatabaseId.isEmpty) {
+        throw ProvisioningException('D1 database id kosong.');
+      }
+      steps = _setStep(steps, currentStep, ProvisioningStepStatus.ok, d1DatabaseId);
+      yield ProvisioningUpdate(steps: steps);
+
+      currentStep = 'worker';
+      steps = _setStep(steps, currentStep, ProvisioningStepStatus.running, scriptName);
+      yield ProvisioningUpdate(steps: steps);
+      await cf.uploadWorkerScript(
+        accountId: accountId,
+        scriptName: scriptName,
+        sourceCode: workerSource,
+        domain: domain,
+        kvNamespaceId: kvNamespaceId,
+        compatibilityDate: '2026-04-18',
+        d1DatabaseId: d1DatabaseId,
+      );
+      steps = _setStep(steps, currentStep, ProvisioningStepStatus.ok, scriptName);
+      yield ProvisioningUpdate(steps: steps);
+
+      currentStep = 'schema';
+      steps = _setStep(steps, currentStep, ProvisioningStepStatus.running, 'Creating inbox tables');
+      yield ProvisioningUpdate(steps: steps);
+      for (final statement in _d1SchemaStatements) {
+        await cf.queryD1(accountId, d1DatabaseId, statement);
+      }
+      try {
+        await cf.queryD1(accountId, d1DatabaseId, "ALTER TABLE messages ADD COLUMN rendered_html TEXT NOT NULL DEFAULT ''");
+      } on Object catch (error) {
+        if (!error.toString().toLowerCase().contains('duplicate column')) rethrow;
+      }
+      steps = _setStep(steps, currentStep, ProvisioningStepStatus.ok, 'Schema ready');
+      yield ProvisioningUpdate(steps: steps);
+
+      currentStep = 'secrets';
+      steps = _setStep(steps, currentStep, ProvisioningStepStatus.running, 'BOT_TOKEN + WEBHOOK_SECRET');
+      yield ProvisioningUpdate(steps: steps);
+      await cf.setWorkerSecret(accountId, scriptName, 'BOT_TOKEN', draft.telegramBotToken.trim());
+      await cf.setWorkerSecret(accountId, scriptName, 'WEBHOOK_SECRET', webhookSecret);
+      await cf.putKVValue(accountId, kvNamespaceId, 'domains', jsonEncode(<String>[domain]));
+      steps = _setStep(steps, currentStep, ProvisioningStepStatus.ok, 'Secrets stored');
+      yield ProvisioningUpdate(steps: steps);
+
+      currentStep = 'subdomain';
+      steps = _setStep(steps, currentStep, ProvisioningStepStatus.running, accountSubdomain);
+      yield ProvisioningUpdate(steps: steps);
+      await cf.enableWorkerSubdomain(accountId, scriptName);
+      final workerUrl = 'https://$scriptName.$accountSubdomain.workers.dev';
+      steps = _setStep(steps, currentStep, ProvisioningStepStatus.ok, workerUrl);
+      yield ProvisioningUpdate(steps: steps);
+
+      currentStep = 'routing';
+      steps = _setStep(steps, currentStep, ProvisioningStepStatus.running, 'Enable routing DNS');
+      yield ProvisioningUpdate(steps: steps);
+      await cf.enableEmailRoutingDns(zoneId);
+      steps = _setStep(steps, currentStep, ProvisioningStepStatus.ok, 'Email Routing DNS ready');
+      yield ProvisioningUpdate(steps: steps);
+
+      currentStep = 'catchall';
+      steps = _setStep(steps, currentStep, ProvisioningStepStatus.running, 'Check catch-all');
+      yield ProvisioningUpdate(steps: steps);
+      final catchAll = await cf.getCatchAllRule(zoneId);
+      final existingTarget = normalizeCatchAllTarget(catchAll);
+      if (existingTarget.isNotEmpty && existingTarget != scriptName) {
+        throw ProvisioningException('Catch-all sudah mengarah ke Worker "$existingTarget". Mobile MVP belum force replace; pakai npm admin --force dulu.');
+      }
+      await cf.setCatchAllWorker(zoneId, scriptName);
+      steps = _setStep(steps, currentStep, ProvisioningStepStatus.ok, scriptName);
+      yield ProvisioningUpdate(steps: steps);
+
+      currentStep = 'webhook';
+      final webhookUrl = '$workerUrl/tg/$webhookSecret';
+      steps = _setStep(steps, currentStep, ProvisioningStepStatus.running, 'Set Telegram webhook');
+      yield ProvisioningUpdate(steps: steps);
+      await tg.setWebhook(url: webhookUrl, secretToken: webhookSecret);
+      steps = _setStep(steps, currentStep, ProvisioningStepStatus.ok, 'Webhook ready');
+      final state = MobileSetupState(
+        primaryDomain: domain,
+        scriptName: scriptName,
+        workerUrl: workerUrl,
+        dashboardUrl: '$workerUrl/app',
+        botUsername: botUsername,
+        domains: <String>[domain],
+        claimLink: 'https://t.me/$botUsername?start=claim',
+        accountId: accountId,
+        zoneId: zoneId,
+        kvNamespaceId: kvNamespaceId,
+        d1DatabaseId: d1DatabaseId,
+      );
+      yield ProvisioningUpdate(steps: steps, state: state);
+    } on Object catch (error) {
+      steps = _setStep(steps, currentStep, ProvisioningStepStatus.failed, error.toString());
+      yield ProvisioningUpdate(steps: steps, error: error.toString());
+    }
   }
 
   Stream<List<ProvisioningStep>> dryRunSetup(SetupDraft draft) async* {
@@ -36,7 +225,48 @@ class ProvisioningService {
     }
   }
 
-  // TODO(next): port src/lib/service.js performSetup/addDomainToApp/performVerify
-  // into Dart so this service executes real Cloudflare + Telegram provisioning
-  // directly from the Android device without Termux.
+  static String normalizeCatchAllTarget(Map<String, dynamic> catchAll) {
+    final actions = catchAll['actions'];
+    if (actions is! List<dynamic>) return '';
+    for (final action in actions) {
+      final item = Map<String, dynamic>.from(action as Map<dynamic, dynamic>);
+      if (item['type'] != 'worker') continue;
+      final value = item['value'];
+      if (value is List<dynamic> && value.isNotEmpty) return value.first.toString();
+    }
+    return '';
+  }
+
+  static List<ProvisioningStep> _setStep(
+    List<ProvisioningStep> steps,
+    String id,
+    ProvisioningStepStatus status,
+    String detail,
+  ) {
+    return steps
+        .map((step) => step.id == id ? step.copyWith(status: status, detail: detail) : step)
+        .toList(growable: false);
+  }
+
+  static String _randomToken(int length) {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+    final random = Random.secure();
+    return List<String>.generate(length, (_) => chars[random.nextInt(chars.length)]).join();
+  }
+}
+
+class ProvisioningUpdate {
+  const ProvisioningUpdate({required this.steps, this.state, this.error});
+
+  final List<ProvisioningStep> steps;
+  final MobileSetupState? state;
+  final String? error;
+}
+
+class ProvisioningException implements Exception {
+  ProvisioningException(this.message);
+  final String message;
+
+  @override
+  String toString() => message;
 }

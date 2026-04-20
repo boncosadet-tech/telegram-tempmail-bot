@@ -66,6 +66,11 @@ class MobileSetupState {
     required this.dashboardUrl,
     required this.botUsername,
     required this.domains,
+    this.claimLink = '',
+    this.accountId = '',
+    this.zoneId = '',
+    this.kvNamespaceId = '',
+    this.d1DatabaseId = '',
   });
 
   final String primaryDomain;
@@ -74,4 +79,9 @@ class MobileSetupState {
   final String dashboardUrl;
   final String botUsername;
   final List<String> domains;
+  final String claimLink;
+  final String accountId;
+  final String zoneId;
+  final String kvNamespaceId;
+  final String d1DatabaseId;
 }

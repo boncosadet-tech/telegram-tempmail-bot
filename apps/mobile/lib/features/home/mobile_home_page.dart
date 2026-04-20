@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
 
 import '../../core/models/setup_models.dart';
 import '../../core/validators/input_validators.dart';
@@ -55,26 +56,28 @@ class _MobileHomePageState extends State<MobileHomePage> {
     );
   }
 
-  Future<void> _runDrySetup() async {
+  Future<void> _runSetup() async {
     if (!_draft.isValid) {
       _showSnack('Form belum valid. Cek email, API key, bot token, dan domain.');
       return;
     }
     _go(2);
-    await for (final steps in _provisioning.dryRunSetup(_draft)) {
+    final workerSource = await rootBundle.loadString('assets/worker/main.js');
+    String? error;
+    await for (final update in _provisioning.runSetup(_draft, workerSource: workerSource)) {
       if (!mounted) return;
-      setState(() => _steps = steps);
+      setState(() {
+        _steps = update.steps;
+        if (update.state != null) _setupState = update.state;
+      });
+      error = update.error;
     }
-    setState(() {
-      _setupState = MobileSetupState(
-        primaryDomain: _draft.normalizedDomain,
-        scriptName: _draft.effectiveScriptName,
-        workerUrl: 'https://${_draft.effectiveScriptName}.workers.dev',
-        dashboardUrl: 'https://${_draft.effectiveScriptName}.workers.dev/app',
-        botUsername: 'connect-after-api-port',
-        domains: <String>[_draft.normalizedDomain],
-      );
-    });
+    if (!mounted) return;
+    if (error != null) {
+      _showSnack('Setup gagal: $error');
+      return;
+    }
+    _showSnack('Setup selesai. Buka claim link di Telegram.');
     _go(3);
   }
 
@@ -114,7 +117,7 @@ class _MobileHomePageState extends State<MobileHomePage> {
                       onToggleSave: (value) => setState(() => _saveCredentials = value),
                       onToggleSecretMode: () => setState(() => _hideSecrets = !_hideSecrets),
                       onBack: () => _go(0),
-                      onSubmit: _runDrySetup,
+                      onSubmit: _runSetup,
                     ),
                     _ProgressStep(steps: _steps),
                     _DashboardStep(
@@ -266,7 +269,7 @@ class _CredentialsStep extends StatelessWidget {
           children: <Widget>[
             const Text('Credential setup', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900)),
             const SizedBox(height: 8),
-            const Text('Credential tidak boleh dikirim ke server pihak ketiga. Next phase: simpan dengan Android secure storage.'),
+            const Text('Credential dipakai langsung dari device ke Cloudflare/Telegram. Jangan lanjut kalau domain production masih punya email lama aktif.'),
             const SizedBox(height: 16),
             _Field(controller: emailController, label: 'Cloudflare email', icon: Icons.alternate_email),
             _Field(controller: globalKeyController, label: 'Cloudflare Global API Key', icon: Icons.key, obscure: hideSecrets),
@@ -278,7 +281,7 @@ class _CredentialsStep extends StatelessWidget {
               value: saveCredentials,
               onChanged: onToggleSave,
               title: const Text('Simpan credential aman di device'),
-              subtitle: const Text('Default off sampai secure storage selesai.'),
+              subtitle: const Text('Belum aktif sampai secure storage selesai; credential tidak disimpan permanen.'),
             ),
             TextButton.icon(
               onPressed: onToggleSecretMode,
@@ -289,7 +292,7 @@ class _CredentialsStep extends StatelessWidget {
               children: <Widget>[
                 Expanded(child: OutlinedButton(onPressed: onBack, child: const Text('Kembali'))),
                 const SizedBox(width: 12),
-                Expanded(child: FilledButton(onPressed: onSubmit, child: const Text('Dry setup'))),
+                Expanded(child: FilledButton(onPressed: onSubmit, child: const Text('Setup sekarang'))),
               ],
             ),
           ],
@@ -400,6 +403,8 @@ class _DashboardStep extends StatelessWidget {
             _InfoRow(label: 'Worker', value: current.workerUrl),
             _InfoRow(label: 'Dashboard', value: current.dashboardUrl),
             _InfoRow(label: 'Domains', value: current.domains.join(', ')),
+            if (current.claimLink.isNotEmpty) _InfoRow(label: 'Claim link', value: current.claimLink),
+            if (current.botUsername.isNotEmpty) _InfoRow(label: 'Bot', value: '@${current.botUsername}'),
           ],
           const Spacer(),
           FilledButton.icon(onPressed: onAddDomain, icon: const Icon(Icons.add_link), label: const Text('Tambah domain')),
