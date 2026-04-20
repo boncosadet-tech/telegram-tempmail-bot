@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:telegram_tempmail_mobile/core/models/setup_models.dart';
 import 'package:telegram_tempmail_mobile/core/validators/input_validators.dart';
 
 void main() {
@@ -20,5 +21,20 @@ void main() {
   test('Telegram token validator detects bot token shape', () {
     expect(InputValidators.isTelegramBotToken('123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi_123'), isTrue);
     expect(InputValidators.isTelegramBotToken('not-a-token'), isFalse);
+  });
+
+  test('SetupDraft carries MX replacement safety toggle', () {
+    const draft = SetupDraft(
+      cloudflareEmail: 'owner@example.com',
+      cloudflareGlobalApiKey: 'abcdefghijklmnopqrstuvwxyz',
+      telegramBotToken: '123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi_123',
+      domain: 'example.com',
+      scriptName: 'telegram-tempmail',
+      saveCredentials: false,
+      replaceExistingMxRecords: true,
+    );
+
+    expect(draft.replaceExistingMxRecords, isTrue);
+    expect(draft.isValid, isTrue);
   });
 }

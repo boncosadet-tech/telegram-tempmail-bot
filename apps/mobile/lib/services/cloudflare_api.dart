@@ -144,6 +144,30 @@ class CloudflareApi {
     return Map<String, dynamic>.from(response['result'] as Map<dynamic, dynamic>);
   }
 
+  Future<List<Map<String, dynamic>>> listDnsRecords(String zoneId, {String type = ''}) async {
+    final suffix = type.isEmpty ? '' : '?type=${Uri.encodeQueryComponent(type)}&per_page=100';
+    final response = await _requestJson(Uri.parse('$baseUrl/zones/$zoneId/dns_records$suffix'), method: 'GET');
+    return _resultList(response);
+  }
+
+  Future<void> deleteDnsRecord(String zoneId, String recordId) async {
+    await _requestJson(Uri.parse('$baseUrl/zones/$zoneId/dns_records/$recordId'), method: 'DELETE');
+  }
+
+  Future<int> deleteNonCloudflareMxRecords(String zoneId) async {
+    final records = await listDnsRecords(zoneId, type: 'MX');
+    var deleted = 0;
+    for (final record in records) {
+      final id = record['id']?.toString() ?? '';
+      final content = (record['content'] ?? record['value'] ?? '').toString().toLowerCase();
+      if (id.isEmpty) continue;
+      if (content.endsWith('.mx.cloudflare.net') || content.contains('.mx.cloudflare.net')) continue;
+      await deleteDnsRecord(zoneId, id);
+      deleted += 1;
+    }
+    return deleted;
+  }
+
   Future<void> enableEmailRoutingDns(String zoneId) async {
     await _requestJson(Uri.parse('$baseUrl/zones/$zoneId/email/routing/dns'), method: 'POST');
   }
@@ -223,7 +247,7 @@ class CloudflareApi {
       final raw = await utf8.decodeStream(response);
       final data = raw.isEmpty ? <String, dynamic>{} : jsonDecode(raw) as Map<String, dynamic>;
       if (response.statusCode < 200 || response.statusCode >= 300 || data['success'] == false) {
-        throw CloudflareApiException('Cloudflare API gagal (${response.statusCode}): $raw');
+        throw _cloudflareException(response.statusCode, raw, data);
       }
       return data;
     } finally {
@@ -262,11 +286,30 @@ class CloudflareApi {
       final raw = await utf8.decodeStream(response);
       final data = raw.isEmpty ? <String, dynamic>{} : jsonDecode(raw) as Map<String, dynamic>;
       if (response.statusCode < 200 || response.statusCode >= 300 || data['success'] == false) {
-        throw CloudflareApiException('Cloudflare Worker upload gagal (${response.statusCode}): $raw');
+        throw _cloudflareException(response.statusCode, raw, data, prefix: 'Cloudflare Worker upload gagal');
       }
     } finally {
       client.close(force: true);
     }
+  }
+
+
+  CloudflareApiException _cloudflareException(int statusCode, String raw, Map<String, dynamic> data, {String prefix = 'Cloudflare API gagal'}) {
+    final errors = data['errors'];
+    final codes = <int>[];
+    final messages = <String>[];
+    if (errors is List<dynamic>) {
+      for (final error in errors) {
+        if (error is Map<dynamic, dynamic>) {
+          final code = int.tryParse(error['code']?.toString() ?? '');
+          if (code != null) codes.add(code);
+          final message = error['message']?.toString();
+          if (message != null && message.isNotEmpty) messages.add(message);
+        }
+      }
+    }
+    final detail = messages.isEmpty ? raw : messages.join('; ');
+    return CloudflareApiException('$prefix ($statusCode): $detail', statusCode: statusCode, errorCodes: codes, rawBody: raw);
   }
 
   List<Map<String, dynamic>> _resultList(Map<String, dynamic> response) {
@@ -293,8 +336,14 @@ class MultipartTextFile {
 }
 
 class CloudflareApiException implements Exception {
-  CloudflareApiException(this.message);
+  CloudflareApiException(this.message, {this.statusCode = 0, this.errorCodes = const <int>[], this.rawBody = ''});
+
   final String message;
+  final int statusCode;
+  final List<int> errorCodes;
+  final String rawBody;
+
+  bool hasCode(int code) => errorCodes.contains(code);
 
   @override
   String toString() => message;

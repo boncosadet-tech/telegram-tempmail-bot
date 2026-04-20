@@ -23,6 +23,7 @@ class _MobileHomePageState extends State<MobileHomePage> {
   final TextEditingController _scriptController = TextEditingController(text: 'telegram-tempmail');
 
   bool _saveCredentials = false;
+  bool _replaceExistingMxRecords = false;
   bool _hideSecrets = true;
   bool _addingDomain = false;
   int _page = 0;
@@ -47,6 +48,7 @@ class _MobileHomePageState extends State<MobileHomePage> {
         domain: _domainController.text,
         scriptName: _scriptController.text,
         saveCredentials: _saveCredentials,
+        replaceExistingMxRecords: _replaceExistingMxRecords,
       );
 
   void _go(int page) {
@@ -163,8 +165,10 @@ class _MobileHomePageState extends State<MobileHomePage> {
                       domainController: _domainController,
                       scriptController: _scriptController,
                       saveCredentials: _saveCredentials,
+                      replaceExistingMxRecords: _replaceExistingMxRecords,
                       hideSecrets: _hideSecrets,
                       onToggleSave: (value) => setState(() => _saveCredentials = value),
+                      onToggleReplaceMx: (value) => setState(() => _replaceExistingMxRecords = value),
                       onToggleSecretMode: () => setState(() => _hideSecrets = !_hideSecrets),
                       onBack: () => _go(0),
                       onSubmit: _runSetup,
@@ -308,8 +312,10 @@ class _CredentialsStep extends StatelessWidget {
     required this.domainController,
     required this.scriptController,
     required this.saveCredentials,
+    required this.replaceExistingMxRecords,
     required this.hideSecrets,
     required this.onToggleSave,
+    required this.onToggleReplaceMx,
     required this.onToggleSecretMode,
     required this.onBack,
     required this.onSubmit,
@@ -321,8 +327,10 @@ class _CredentialsStep extends StatelessWidget {
   final TextEditingController domainController;
   final TextEditingController scriptController;
   final bool saveCredentials;
+  final bool replaceExistingMxRecords;
   final bool hideSecrets;
   final ValueChanged<bool> onToggleSave;
+  final ValueChanged<bool> onToggleReplaceMx;
   final VoidCallback onToggleSecretMode;
   final VoidCallback onBack;
   final VoidCallback onSubmit;
@@ -349,6 +357,13 @@ class _CredentialsStep extends StatelessWidget {
               onChanged: onToggleSave,
               title: const Text('Simpan credential aman di device'),
               subtitle: const Text('Belum aktif sampai secure storage selesai; credential tidak disimpan permanen.'),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: replaceExistingMxRecords,
+              onChanged: onToggleReplaceMx,
+              title: const Text('Ganti MX lama otomatis'),
+              subtitle: const Text('Hapus MX non-Cloudflare jika Cloudflare menolak Email Routing. Gunakan hanya untuk domain test/kosong.'),
             ),
             TextButton.icon(
               onPressed: onToggleSecretMode,

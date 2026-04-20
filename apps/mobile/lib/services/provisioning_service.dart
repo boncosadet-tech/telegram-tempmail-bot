@@ -166,9 +166,21 @@ class ProvisioningService {
       currentStep = 'routing';
       steps = _setStep(steps, currentStep, ProvisioningStepStatus.running, 'Enable routing DNS');
       yield ProvisioningUpdate(steps: steps);
-      await cf.enableEmailRoutingDns(zoneId);
-      steps = _setStep(steps, currentStep, ProvisioningStepStatus.ok, 'Email Routing DNS ready');
-      yield ProvisioningUpdate(steps: steps);
+      try {
+        await cf.enableEmailRoutingDns(zoneId);
+      } on CloudflareApiException catch (error) {
+        if (!error.hasCode(2008) || !draft.replaceExistingMxRecords) rethrow;
+        steps = _setStep(steps, currentStep, ProvisioningStepStatus.running, 'Deleting old non-Cloudflare MX records');
+        yield ProvisioningUpdate(steps: steps);
+        final deleted = await cf.deleteNonCloudflareMxRecords(zoneId);
+        await cf.enableEmailRoutingDns(zoneId);
+        steps = _setStep(steps, currentStep, ProvisioningStepStatus.ok, 'Email Routing DNS ready; deleted $deleted old MX record(s)');
+        yield ProvisioningUpdate(steps: steps);
+      }
+      if (steps.firstWhere((step) => step.id == currentStep).status != ProvisioningStepStatus.ok) {
+        steps = _setStep(steps, currentStep, ProvisioningStepStatus.ok, 'Email Routing DNS ready');
+        yield ProvisioningUpdate(steps: steps);
+      }
 
       currentStep = 'catchall';
       steps = _setStep(steps, currentStep, ProvisioningStepStatus.running, 'Check catch-all');
@@ -257,7 +269,13 @@ class ProvisioningService {
       throw ProvisioningException('Catch-all $newDomain sudah mengarah ke Worker "$existingTarget". Aktifkan force hanya untuk domain test/kosong.');
     }
 
-    await cf.enableEmailRoutingDns(zoneId);
+    try {
+      await cf.enableEmailRoutingDns(zoneId);
+    } on CloudflareApiException catch (error) {
+      if (!error.hasCode(2008) || !force) rethrow;
+      await cf.deleteNonCloudflareMxRecords(zoneId);
+      await cf.enableEmailRoutingDns(zoneId);
+    }
     await cf.setCatchAllWorker(zoneId, state.scriptName);
 
     final kvRaw = await cf.getKVValue(state.accountId, namespaceId, 'domains');

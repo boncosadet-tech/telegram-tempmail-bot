@@ -29,4 +29,15 @@ void main() {
       'telegram-tempmail',
     );
   });
+
+  test('normalizeCatchAllTarget returns empty when no worker action exists', () {
+    expect(
+      ProvisioningService.normalizeCatchAllTarget(<String, dynamic>{
+        'actions': <Map<String, dynamic>>[
+          <String, dynamic>{'type': 'forward', 'value': <String>['owner@example.com']},
+        ],
+      }),
+      '',
+    );
+  });
 }

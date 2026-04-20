@@ -8,6 +8,7 @@ class SetupDraft {
     required this.domain,
     required this.scriptName,
     required this.saveCredentials,
+    required this.replaceExistingMxRecords,
   });
 
   final String cloudflareEmail;
@@ -16,6 +17,7 @@ class SetupDraft {
   final String domain;
   final String scriptName;
   final bool saveCredentials;
+  final bool replaceExistingMxRecords;
 
   String get normalizedDomain => InputValidators.normalizeDomain(domain);
 
