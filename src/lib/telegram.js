@@ -25,7 +25,7 @@ export class TelegramClient {
     return this.request("setWebhook", {
       url,
       secret_token: secretToken,
-      allowed_updates: ["message"],
+      allowed_updates: ["message", "edited_message", "callback_query"],
       drop_pending_updates: false
     });
   }
