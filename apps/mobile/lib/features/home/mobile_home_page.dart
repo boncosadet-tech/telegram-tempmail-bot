@@ -304,6 +304,7 @@ class _AppCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final dark = Theme.of(context).colorScheme.brightness == Brightness.dark;
     final surface = dark ? AppColors.darkSurface : AppColors.surface;
+    final border = dark ? AppColors.darkBorder : AppColors.border;
     return AnimatedOpacity(
       duration: const Duration(milliseconds: 220),
       opacity: dimmed ? .58 : 1,
@@ -312,19 +313,28 @@ class _AppCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: surface,
           borderRadius: BorderRadius.circular(AppSpacing.radius),
-          border: Border.all(color: dark ? AppColors.darkBorder : AppColors.border),
+          border: Border.all(color: border),
           boxShadow: dark ? const <BoxShadow>[] : AppShadows.card,
         ),
         clipBehavior: Clip.antiAlias,
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+        child: Stack(
           children: <Widget>[
-            Container(width: 4, color: accentColor ?? Colors.transparent),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.all(AppSpacing.card),
-                child: child,
+            if (accentColor != null)
+              Positioned(
+                left: 0,
+                top: 0,
+                bottom: 0,
+                width: 4,
+                child: ColoredBox(color: accentColor!),
               ),
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                AppSpacing.card + (accentColor == null ? 0 : 4),
+                AppSpacing.card,
+                AppSpacing.card,
+                AppSpacing.card,
+              ),
+              child: child,
             ),
           ],
         ),
@@ -341,8 +351,9 @@ class _WelcomeStep extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _Screen(
+      scroll: true,
       children: <Widget>[
-        const Spacer(),
+        const SizedBox(height: 18),
         Center(
           child: TweenAnimationBuilder<double>(
             tween: Tween<double>(begin: .92, end: 1),
@@ -381,12 +392,19 @@ class _WelcomeStep extends StatelessWidget {
             'Telegram bot + web dashboard',
           ]),
         ),
-        const Spacer(),
+        const SizedBox(height: 10),
         FilledButton.icon(
           onPressed: onStart,
           icon: const Icon(Icons.arrow_forward_rounded),
           label: const Text('Get Started'),
         ),
+        const SizedBox(height: 10),
+        OutlinedButton.icon(
+          onPressed: onStart,
+          icon: const Icon(Icons.settings_rounded),
+          label: const Text('Open Configuration'),
+        ),
+        const SizedBox(height: 18),
       ],
     );
   }
