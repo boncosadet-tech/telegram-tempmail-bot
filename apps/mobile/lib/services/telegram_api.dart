@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 class TelegramApi {
+  static const Duration _networkTimeout = Duration(seconds: 45);
   TelegramApi(this.botToken);
 
   final String botToken;
@@ -27,13 +28,13 @@ class TelegramApi {
   }
 
   Future<Map<String, dynamic>> _request(String method, [Map<String, dynamic>? payload]) async {
-    final client = HttpClient();
+    final client = HttpClient()..connectionTimeout = _networkTimeout;
     try {
       final request = await client.postUrl(Uri.parse('https://api.telegram.org/bot$botToken/$method'));
       request.headers.contentType = ContentType.json;
       request.write(jsonEncode(payload ?? <String, dynamic>{}));
-      final response = await request.close();
-      final raw = await utf8.decodeStream(response);
+      final response = await request.close().timeout(_networkTimeout);
+      final raw = await utf8.decodeStream(response).timeout(_networkTimeout);
       final data = raw.isEmpty ? <String, dynamic>{} : jsonDecode(raw) as Map<String, dynamic>;
       if (response.statusCode < 200 || response.statusCode >= 300 || data['ok'] == false) {
         throw TelegramApiException('Telegram API gagal (${response.statusCode}): $raw');

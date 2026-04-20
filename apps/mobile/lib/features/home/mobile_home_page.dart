@@ -1,7 +1,10 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 
 import '../../core/models/setup_models.dart';
+import '../../core/theme/app_design.dart';
 import '../../core/validators/input_validators.dart';
 import '../../services/native_actions.dart';
 import '../../services/provisioning_service.dart';
@@ -55,7 +58,7 @@ class _MobileHomePageState extends State<MobileHomePage> {
     setState(() => _page = page);
     _pageController.animateToPage(
       page,
-      duration: const Duration(milliseconds: 360),
+      duration: const Duration(milliseconds: 320),
       curve: Curves.easeOutCubic,
     );
   }
@@ -65,6 +68,7 @@ class _MobileHomePageState extends State<MobileHomePage> {
       _showSnack('Form belum valid. Cek email, API key, bot token, dan domain.');
       return;
     }
+    setState(() => _steps = _provisioning.initialSteps());
     _go(2);
     final workerSource = await rootBundle.loadString('assets/worker/main.js');
     String? error;
@@ -75,16 +79,20 @@ class _MobileHomePageState extends State<MobileHomePage> {
         if (update.state != null) _setupState = update.state;
       });
       error = update.error;
+      if (update.state != null) {
+        await Future<void>.delayed(const Duration(milliseconds: 450));
+        if (!mounted) return;
+        _go(3);
+      }
     }
     if (!mounted) return;
     if (error != null) {
-      _showSnack('Setup gagal: $error');
+      _showSnack('Setup gagal. Buka detail error di step merah.');
       return;
     }
     _showSnack('Setup selesai. Buka claim link di Telegram.');
-    _go(3);
+    if (_setupState != null) _go(3);
   }
-
 
   Future<void> _openUrl(String url) async {
     try {
@@ -123,7 +131,7 @@ class _MobileHomePageState extends State<MobileHomePage> {
       _go(3);
     } on Object catch (error) {
       if (!mounted) return;
-      _showSnack('Add domain gagal: $error');
+      _showSnack('Add domain gagal. ${humanizeError(error.toString())}');
     } finally {
       if (mounted) setState(() => _addingDomain = false);
     }
@@ -137,60 +145,60 @@ class _MobileHomePageState extends State<MobileHomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: AnimatedContainer(
-        duration: const Duration(milliseconds: 520),
+        duration: const Duration(milliseconds: 450),
         curve: Curves.easeOutCubic,
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: _page.isEven
-                ? const <Color>[Color(0xFFFFFBEA), Color(0xFFFFE082), Color(0xFFFFB300)]
-                : const <Color>[Color(0xFFFFFBF0), Color(0xFFFFD45A), Color(0xFFFF8A00)],
-          ),
-        ),
+        color: Theme.of(context).colorScheme.brightness == Brightness.dark ? AppColors.darkBackground : AppColors.background,
         child: SafeArea(
-          child: Column(
-            children: <Widget>[
-              _TopBar(page: _page),
-              Expanded(
-                child: PageView(
-                  controller: _pageController,
-                  physics: const NeverScrollableScrollPhysics(),
-                  children: <Widget>[
-                    _WelcomeStep(onStart: () => _go(1)),
-                    _CredentialsStep(
-                      emailController: _emailController,
-                      globalKeyController: _globalKeyController,
-                      botTokenController: _botTokenController,
-                      domainController: _domainController,
-                      scriptController: _scriptController,
-                      saveCredentials: _saveCredentials,
-                      replaceExistingMxRecords: _replaceExistingMxRecords,
-                      hideSecrets: _hideSecrets,
-                      onToggleSave: (value) => setState(() => _saveCredentials = value),
-                      onToggleReplaceMx: (value) => setState(() => _replaceExistingMxRecords = value),
-                      onToggleSecretMode: () => setState(() => _hideSecrets = !_hideSecrets),
-                      onBack: () => _go(0),
-                      onSubmit: _runSetup,
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: AppSpacing.maxWidth),
+              child: Column(
+                children: <Widget>[
+                  _TopBar(page: _page),
+                  Expanded(
+                    child: PageView(
+                      controller: _pageController,
+                      physics: const NeverScrollableScrollPhysics(),
+                      children: <Widget>[
+                        _WelcomeStep(onStart: () => _go(1)),
+                        _CredentialsStep(
+                          emailController: _emailController,
+                          globalKeyController: _globalKeyController,
+                          botTokenController: _botTokenController,
+                          domainController: _domainController,
+                          scriptController: _scriptController,
+                          saveCredentials: _saveCredentials,
+                          replaceExistingMxRecords: _replaceExistingMxRecords,
+                          hideSecrets: _hideSecrets,
+                          onToggleSave: (value) => setState(() => _saveCredentials = value),
+                          onToggleReplaceMx: (value) => setState(() => _replaceExistingMxRecords = value),
+                          onToggleSecretMode: () => setState(() => _hideSecrets = !_hideSecrets),
+                          onBack: () => _go(0),
+                          onSubmit: _runSetup,
+                        ),
+                        _ProgressStep(
+                          steps: _steps,
+                          onContinue: _setupState == null ? null : () => _go(3),
+                        ),
+                        _DashboardStep(
+                          state: _setupState,
+                          onAddDomain: () => _go(4),
+                          onReset: () => _go(1),
+                          onOpenUrl: _openUrl,
+                          onCopyText: _copyText,
+                        ),
+                        _AddDomainStep(
+                          primaryDomain: _setupState?.primaryDomain ?? _draft.normalizedDomain,
+                          isRunning: _addingDomain,
+                          onAddDomain: _addDomain,
+                          onBack: () => _go(3),
+                        ),
+                      ],
                     ),
-                    _ProgressStep(steps: _steps),
-                    _DashboardStep(
-                      state: _setupState,
-                      onAddDomain: () => _go(4),
-                      onReset: () => _go(1),
-                      onOpenUrl: _openUrl,
-                      onCopyText: _copyText,
-                    ),
-                    _AddDomainStep(
-                      primaryDomain: _setupState?.primaryDomain ?? _draft.normalizedDomain,
-                      isRunning: _addingDomain,
-                      onAddDomain: _addDomain,
-                      onBack: () => _go(3),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ),
@@ -206,66 +214,120 @@ class _TopBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 12, 18, 8),
-      child: Row(
+      padding: const EdgeInsets.fromLTRB(AppSpacing.screen, 14, AppSpacing.screen, 8),
+      child: Column(
         children: <Widget>[
-          Container(
-            width: 46,
-            height: 46,
-            decoration: BoxDecoration(
-              color: const Color(0xFF171717),
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: const <BoxShadow>[BoxShadow(offset: Offset(3, 3), color: Color(0xFFFFC928))],
-            ),
-            child: const Icon(Icons.mark_email_unread_rounded, color: Color(0xFFFFD84D)),
+          Row(
+            children: <Widget>[
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: AppColors.primary,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(Icons.mark_email_unread_rounded, color: AppColors.onPrimary, size: 24),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text('Private TempMail', style: AppText.h2.copyWith(fontSize: 20)),
+                    const SizedBox(height: 2),
+                    const Text('Cloudflare + Telegram setup', style: AppText.caption),
+                  ],
+                ),
+              ),
+              _StepBadge(page: page),
+            ],
           ),
-          const SizedBox(width: 12),
-          const Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text('Private TempMail', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20)),
-                Text('Cloudflare + Telegram setup APK', style: TextStyle(color: Color(0xFF6B5F3F))),
-              ],
+          const SizedBox(height: 14),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: LinearProgressIndicator(
+              value: (page + 1) / 5,
+              minHeight: 6,
+              color: AppColors.primary,
+              backgroundColor: AppColors.border,
             ),
           ),
-          Text('${page + 1}/5', style: const TextStyle(fontWeight: FontWeight.w900)),
         ],
       ),
     );
   }
 }
 
-class _Card extends StatelessWidget {
-  const _Card({required this.child});
+class _StepBadge extends StatelessWidget {
+  const _StepBadge({required this.page});
 
-  final Widget child;
+  final int page;
 
   @override
   Widget build(BuildContext context) {
-    return TweenAnimationBuilder<double>(
-      tween: Tween<double>(begin: .96, end: 1),
-      duration: const Duration(milliseconds: 420),
-      curve: Curves.easeOutBack,
-      builder: (context, value, child) {
-        return Transform.scale(
-          scale: value,
-          child: child,
-        );
-      },
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 280),
-        curve: Curves.easeOutCubic,
-        width: double.infinity,
-        margin: const EdgeInsets.all(18),
-        padding: const EdgeInsets.all(20),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: AppColors.primary.withValues(alpha: .10),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: AppColors.primary.withValues(alpha: .28)),
+      ),
+      child: Text('Step ${page + 1}/5', style: AppText.caption.copyWith(color: AppColors.primaryVariant, fontWeight: FontWeight.w800)),
+    );
+  }
+}
+
+class _Screen extends StatelessWidget {
+  const _Screen({required this.children, this.scroll = false});
+
+  final List<Widget> children;
+  final bool scroll;
+
+  @override
+  Widget build(BuildContext context) {
+    final content = Padding(
+      padding: const EdgeInsets.fromLTRB(AppSpacing.screen, 8, AppSpacing.screen, AppSpacing.screen),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: children),
+    );
+    return scroll ? SingleChildScrollView(child: content) : content;
+  }
+}
+
+class _AppCard extends StatelessWidget {
+  const _AppCard({required this.child, this.accentColor, this.dimmed = false});
+
+  final Widget child;
+  final Color? accentColor;
+  final bool dimmed;
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).colorScheme.brightness == Brightness.dark;
+    final surface = dark ? AppColors.darkSurface : AppColors.surface;
+    return AnimatedOpacity(
+      duration: const Duration(milliseconds: 220),
+      opacity: dimmed ? .58 : 1,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: AppSpacing.section),
         decoration: BoxDecoration(
-          color: const Color(0xF0FFFFFF),
-          border: Border.all(color: const Color(0xFF171717), width: 3),
-          borderRadius: BorderRadius.circular(28),
-          boxShadow: const <BoxShadow>[BoxShadow(offset: Offset(8, 8), color: Color(0xFF171717))],
+          color: surface,
+          borderRadius: BorderRadius.circular(AppSpacing.radius),
+          border: Border.all(color: dark ? AppColors.darkBorder : AppColors.border),
+          boxShadow: dark ? const <BoxShadow>[] : AppShadows.card,
         ),
-        child: child,
+        clipBehavior: Clip.antiAlias,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Container(width: 4, color: accentColor ?? Colors.transparent),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(AppSpacing.card),
+                child: child,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -278,28 +340,54 @@ class _WelcomeStep extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _Card(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          const Text('Setup tempmail dari HP', style: TextStyle(fontSize: 34, fontWeight: FontWeight.w900, height: .95)),
-          const SizedBox(height: 14),
-          const Text('Versi mobile untuk npm app yang sudah ada. Runtime tetap Cloudflare-only, HP hanya dipakai untuk setup dan admin.'),
-          const SizedBox(height: 20),
-          const _Checklist(items: <String>[
-            'Cloudflare Free compatible',
-            'Tanpa VPS / Termux setelah setup',
-            'Support multi-domain: dahus.my.id + excalibur.email',
-            'Telegram bot UI dengan tombol inline',
-          ]),
-          const Spacer(),
-          FilledButton.icon(
-            onPressed: onStart,
-            icon: const Icon(Icons.rocket_launch_rounded),
-            label: const Text('Mulai setup'),
+    return _Screen(
+      children: <Widget>[
+        const Spacer(),
+        Center(
+          child: TweenAnimationBuilder<double>(
+            tween: Tween<double>(begin: .92, end: 1),
+            duration: const Duration(milliseconds: 520),
+            curve: Curves.easeOutBack,
+            builder: (context, value, child) => Transform.scale(scale: value, child: child),
+            child: Container(
+              width: 86,
+              height: 86,
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(colors: <Color>[AppColors.primary, AppColors.primaryVariant]),
+                borderRadius: BorderRadius.circular(26),
+                boxShadow: <BoxShadow>[
+                  BoxShadow(color: AppColors.primary.withValues(alpha: .28), blurRadius: 30, offset: const Offset(0, 12)),
+                ],
+              ),
+              child: const Icon(Icons.mark_email_unread_rounded, color: AppColors.onPrimary, size: 42),
+            ),
           ),
-        ],
-      ),
+        ),
+        const SizedBox(height: 24),
+        const Text('Private TempMail', textAlign: TextAlign.center, style: AppText.h1),
+        const SizedBox(height: 8),
+        Text(
+          'Disposable email powered by Cloudflare Workers + Telegram',
+          textAlign: TextAlign.center,
+          style: AppText.body.copyWith(color: AppColors.textSecondary),
+        ),
+        const SizedBox(height: 24),
+        const _AppCard(
+          accentColor: AppColors.primary,
+          child: _Checklist(items: <String>[
+            'Cloudflare Free compatible',
+            'No local server after setup',
+            'Multi-domain temp mail routing',
+            'Telegram bot + web dashboard',
+          ]),
+        ),
+        const Spacer(),
+        FilledButton.icon(
+          onPressed: onStart,
+          icon: const Icon(Icons.arrow_forward_rounded),
+          label: const Text('Get Started'),
+        ),
+      ],
     );
   }
 }
@@ -337,74 +425,162 @@ class _CredentialsStep extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      child: _Card(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    return _Screen(
+      scroll: true,
+      children: <Widget>[
+        const Text('Configuration', style: AppText.h1),
+        const SizedBox(height: 6),
+        const Text('Masukkan credential yang dipakai langsung dari device ke Cloudflare dan Telegram.', style: AppText.body),
+        const SizedBox(height: AppSpacing.section),
+        _AppCard(
+          accentColor: AppColors.primary,
+          child: Column(
+            children: <Widget>[
+              _Field(
+                controller: emailController,
+                label: 'Cloudflare email',
+                helper: 'Email login Cloudflare kamu.',
+                icon: Icons.alternate_email,
+                validator: InputValidators.isCloudflareEmail,
+              ),
+              _Field(
+                controller: globalKeyController,
+                label: 'Cloudflare Global API Key',
+                helper: 'Key dari Cloudflare > My Profile > API Tokens > Global API Key.',
+                icon: Icons.key_rounded,
+                obscure: hideSecrets,
+                validator: InputValidators.isGlobalApiKey,
+              ),
+              _Field(
+                controller: botTokenController,
+                label: 'Telegram Bot Token',
+                helper: 'Token bot dari @BotFather.',
+                icon: Icons.smart_toy_rounded,
+                obscure: hideSecrets,
+                validator: InputValidators.isTelegramBotToken,
+              ),
+              _Field(
+                controller: domainController,
+                label: 'Domain utama',
+                helper: 'Domain harus sudah Active/onboard di Cloudflare.',
+                icon: Icons.language_rounded,
+                validator: InputValidators.isDomain,
+              ),
+              _Field(
+                controller: scriptController,
+                label: 'Worker script name',
+                helper: 'Default aman: telegram-tempmail.',
+                icon: Icons.cloud_rounded,
+                validator: (value) => InputValidators.isScriptName(InputValidators.normalizeScriptName(value, domainController.text)),
+              ),
+            ],
+          ),
+        ),
+        _AppCard(
+          accentColor: replaceExistingMxRecords ? AppColors.warning : AppColors.pending,
+          child: Column(
+            children: <Widget>[
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                value: saveCredentials,
+                onChanged: onToggleSave,
+                title: const Text('Simpan credential aman di device', style: AppText.h2),
+                subtitle: const Text('Belum aktif sampai secure storage selesai; credential tidak disimpan permanen.', style: AppText.caption),
+              ),
+              const Divider(height: 18),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                value: replaceExistingMxRecords,
+                onChanged: onToggleReplaceMx,
+                title: const Text('Ganti MX lama otomatis', style: AppText.h2),
+                subtitle: const Text('Hapus MX non-Cloudflare jika Cloudflare menolak Email Routing. Gunakan hanya untuk domain test/kosong.', style: AppText.caption),
+              ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: onToggleSecretMode,
+                  icon: Icon(hideSecrets ? Icons.visibility_rounded : Icons.visibility_off_rounded),
+                  label: Text(hideSecrets ? 'Tampilkan secret' : 'Sembunyikan secret'),
+                ),
+              ),
+            ],
+          ),
+        ),
+        Row(
           children: <Widget>[
-            const Text('Credential setup', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900)),
-            const SizedBox(height: 8),
-            const Text('Credential dipakai langsung dari device ke Cloudflare/Telegram. Jangan lanjut kalau domain production masih punya email lama aktif.'),
-            const SizedBox(height: 16),
-            _Field(controller: emailController, label: 'Cloudflare email', icon: Icons.alternate_email),
-            _Field(controller: globalKeyController, label: 'Cloudflare Global API Key', icon: Icons.key, obscure: hideSecrets),
-            _Field(controller: botTokenController, label: 'Telegram Bot Token', icon: Icons.smart_toy_rounded, obscure: hideSecrets),
-            _Field(controller: domainController, label: 'Domain utama', icon: Icons.language_rounded),
-            _Field(controller: scriptController, label: 'Worker script name', icon: Icons.cloud_rounded),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              value: saveCredentials,
-              onChanged: onToggleSave,
-              title: const Text('Simpan credential aman di device'),
-              subtitle: const Text('Belum aktif sampai secure storage selesai; credential tidak disimpan permanen.'),
-            ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              value: replaceExistingMxRecords,
-              onChanged: onToggleReplaceMx,
-              title: const Text('Ganti MX lama otomatis'),
-              subtitle: const Text('Hapus MX non-Cloudflare jika Cloudflare menolak Email Routing. Gunakan hanya untuk domain test/kosong.'),
-            ),
-            TextButton.icon(
-              onPressed: onToggleSecretMode,
-              icon: Icon(hideSecrets ? Icons.visibility : Icons.visibility_off),
-              label: Text(hideSecrets ? 'Tampilkan secret' : 'Sembunyikan secret'),
-            ),
-            Row(
-              children: <Widget>[
-                Expanded(child: OutlinedButton(onPressed: onBack, child: const Text('Kembali'))),
-                const SizedBox(width: 12),
-                Expanded(child: FilledButton(onPressed: onSubmit, child: const Text('Setup sekarang'))),
-              ],
-            ),
+            Expanded(child: OutlinedButton(onPressed: onBack, child: const Text('Back'))),
+            const SizedBox(width: 12),
+            Expanded(child: FilledButton(onPressed: onSubmit, child: const Text('Continue'))),
           ],
         ),
-      ),
+      ],
     );
   }
 }
 
-class _Field extends StatelessWidget {
-  const _Field({required this.controller, required this.label, required this.icon, this.obscure = false});
+class _Field extends StatefulWidget {
+  const _Field({
+    required this.controller,
+    required this.label,
+    required this.helper,
+    required this.icon,
+    required this.validator,
+    this.obscure = false,
+  });
 
   final TextEditingController controller;
   final String label;
+  final String helper;
   final IconData icon;
   final bool obscure;
+  final bool Function(String value) validator;
+
+  @override
+  State<_Field> createState() => _FieldState();
+}
+
+class _FieldState extends State<_Field> {
+  bool _touched = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_refresh);
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_refresh);
+    super.dispose();
+  }
+
+  void _refresh() {
+    if (mounted) setState(() {});
+  }
 
   @override
   Widget build(BuildContext context) {
+    final value = widget.controller.text;
+    final valid = widget.validator(value);
+    final showError = _touched && value.isNotEmpty && !valid;
+    final showOk = value.isNotEmpty && valid;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.only(bottom: 14),
       child: TextField(
-        controller: controller,
-        obscureText: obscure,
+        controller: widget.controller,
+        obscureText: widget.obscure,
+        minLines: 1,
+        onChanged: (_) => setState(() => _touched = true),
         decoration: InputDecoration(
-          prefixIcon: Icon(icon),
-          labelText: label,
-          filled: true,
-          fillColor: const Color(0xFFFFFBEA),
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(18)),
+          prefixIcon: Icon(widget.icon, size: 22),
+          suffixIcon: showOk
+              ? const Icon(Icons.check_circle_rounded, color: AppColors.success)
+              : showError
+                  ? const Icon(Icons.error_rounded, color: AppColors.error)
+                  : null,
+          labelText: widget.label,
+          helperText: widget.helper,
+          errorText: showError ? 'Format belum valid' : null,
         ),
       ),
     );
@@ -412,67 +588,138 @@ class _Field extends StatelessWidget {
 }
 
 class _ProgressStep extends StatelessWidget {
-  const _ProgressStep({required this.steps});
+  const _ProgressStep({required this.steps, required this.onContinue});
 
   final List<ProvisioningStep> steps;
+  final VoidCallback? onContinue;
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      child: _Card(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            const Text('Setup progress', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900)),
-            const SizedBox(height: 10),
-            for (final step in steps) _StepTile(step: step),
-          ],
+    final completed = steps.where((step) => step.status == ProvisioningStepStatus.ok).length;
+    final failed = steps.any((step) => step.status == ProvisioningStepStatus.failed);
+    return _Screen(
+      scroll: true,
+      children: <Widget>[
+        const Text('Setup Wizard', style: AppText.h1),
+        const SizedBox(height: 6),
+        Text('$completed dari ${steps.length} langkah selesai', style: AppText.body),
+        const SizedBox(height: 12),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(999),
+          child: LinearProgressIndicator(
+            value: completed / max(steps.length, 1),
+            minHeight: 8,
+            color: failed ? AppColors.error : AppColors.primary,
+            backgroundColor: AppColors.border,
+          ),
         ),
-      ),
+        const SizedBox(height: AppSpacing.section),
+        for (final step in steps) _StepTile(step: step),
+        if (onContinue != null) ...<Widget>[
+          const SizedBox(height: 4),
+          FilledButton.icon(
+            onPressed: onContinue,
+            icon: const Icon(Icons.dashboard_rounded),
+            label: const Text('Open Dashboard'),
+          ),
+        ],
+      ],
     );
   }
 }
 
-class _StepTile extends StatelessWidget {
+class _StepTile extends StatefulWidget {
   const _StepTile({required this.step});
 
   final ProvisioningStep step;
 
   @override
+  State<_StepTile> createState() => _StepTileState();
+}
+
+class _StepTileState extends State<_StepTile> with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final step = widget.step;
+    final color = statusColor(step.status);
+    final running = step.status == ProvisioningStepStatus.running;
+    final failed = step.status == ProvisioningStepStatus.failed;
     final icon = switch (step.status) {
-      ProvisioningStepStatus.pending => Icons.radio_button_unchecked,
-      ProvisioningStepStatus.running => Icons.sync,
-      ProvisioningStepStatus.ok => Icons.check_circle,
-      ProvisioningStepStatus.failed => Icons.error,
+      ProvisioningStepStatus.ok => Icons.check_circle_rounded,
+      ProvisioningStepStatus.failed => Icons.error_rounded,
+      ProvisioningStepStatus.running => Icons.sync_rounded,
+      _ => Icons.radio_button_unchecked_rounded,
     };
-    final color = switch (step.status) {
-      ProvisioningStepStatus.pending => Colors.grey,
-      ProvisioningStepStatus.running => Colors.orange,
-      ProvisioningStepStatus.ok => Colors.green,
-      ProvisioningStepStatus.failed => Colors.red,
-    };
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 260),
-      curve: Curves.easeOutCubic,
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: step.status == ProvisioningStepStatus.pending ? .04 : .10),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: color.withValues(alpha: .22)),
-      ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
-        leading: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 220),
-          child: Icon(icon, key: ValueKey<ProvisioningStepStatus>(step.status), color: color),
+    final body = Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        running
+            ? SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5, color: color))
+            : Icon(icon, color: color, size: 22),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(step.title, style: AppText.h2.copyWith(fontSize: 16)),
+              if (step.detail.isNotEmpty) ...<Widget>[
+                const SizedBox(height: 4),
+                Text(humanizeError(step.detail), style: failed ? AppText.caption.copyWith(color: AppColors.error, fontWeight: FontWeight.w700) : AppText.caption),
+              ],
+              if (failed && step.detail.isNotEmpty) ...<Widget>[
+                const SizedBox(height: 8),
+                Theme(
+                  data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                  child: ExpansionTile(
+                    tilePadding: EdgeInsets.zero,
+                    childrenPadding: EdgeInsets.zero,
+                    title: Text('Show details', style: AppText.caption.copyWith(fontWeight: FontWeight.w800)),
+                    children: <Widget>[
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: AppColors.error.withValues(alpha: .06),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: AppColors.error.withValues(alpha: .18)),
+                        ),
+                        child: Text(step.detail, style: AppText.mono),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
         ),
-        title: Text(step.title, style: const TextStyle(fontWeight: FontWeight.w800)),
-        subtitle: step.detail.isEmpty ? null : Text(step.detail),
-        trailing: step.status == ProvisioningStepStatus.running
-            ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2.4))
-            : null,
-      ),
+      ],
+    );
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        return _AppCard(
+          accentColor: color,
+          dimmed: step.status == ProvisioningStepStatus.pending,
+          child: running
+              ? Opacity(
+                  opacity: .86 + (_controller.value * .14),
+                  child: child,
+                )
+              : child!,
+        );
+      },
+      child: body,
     );
   }
 }
@@ -495,47 +742,199 @@ class _DashboardStep extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final current = state;
-    return _Card(
+    return _Screen(
+      scroll: true,
+      children: <Widget>[
+        const Text('Manage TempMail', style: AppText.h1),
+        const SizedBox(height: 6),
+        const Text('Kelola domain, alamat tempmail, dashboard inbox, dan Telegram bot.', style: AppText.body),
+        const SizedBox(height: AppSpacing.section),
+        if (current == null)
+          _AppCard(
+            accentColor: AppColors.warning,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                const Text('Belum ada setup state', style: AppText.h2),
+                const SizedBox(height: 6),
+                const Text('Jalankan setup utama dulu sebelum mengelola tempmail.', style: AppText.body),
+                const SizedBox(height: 12),
+                FilledButton(onPressed: onReset, child: const Text('Open setup')),
+              ],
+            ),
+          )
+        else ...<Widget>[
+          _SummaryCard(state: current, onOpenUrl: onOpenUrl, onCopyText: onCopyText),
+          _AddressManagerCard(state: current, onCopyText: onCopyText),
+          _InboxCard(state: current, onOpenUrl: onOpenUrl),
+          Row(
+            children: <Widget>[
+              Expanded(child: FilledButton.icon(onPressed: onAddDomain, icon: const Icon(Icons.add_link_rounded), label: const Text('Add domain'))),
+              const SizedBox(width: 12),
+              Expanded(child: OutlinedButton.icon(onPressed: onReset, icon: const Icon(Icons.settings_rounded), label: const Text('Edit setup'))),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _SummaryCard extends StatelessWidget {
+  const _SummaryCard({required this.state, required this.onOpenUrl, required this.onCopyText});
+
+  final MobileSetupState state;
+  final ValueChanged<String> onOpenUrl;
+  final ValueChanged<String> onCopyText;
+
+  @override
+  Widget build(BuildContext context) {
+    return _AppCard(
+      accentColor: AppColors.success,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          const Text('Dashboard', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900)),
+          Row(
+            children: <Widget>[
+              const Icon(Icons.check_circle_rounded, color: AppColors.success, size: 28),
+              const SizedBox(width: 10),
+              Expanded(child: Text('Setup Complete!', style: AppText.h2.copyWith(fontSize: 20))),
+            ],
+          ),
           const SizedBox(height: 12),
-          if (current == null)
-            const Text('Belum ada setup state. Jalankan setup dulu.')
-          else ...<Widget>[
-            _InfoRow(label: 'Domain', value: current.primaryDomain),
-            _InfoRow(label: 'Script', value: current.scriptName),
-            _InfoRow(label: 'Worker', value: current.workerUrl),
-            _InfoRow(label: 'Dashboard', value: current.dashboardUrl),
-            _InfoRow(label: 'Domains', value: current.domains.join(', ')),
-            if (current.claimLink.isNotEmpty) _InfoRow(label: 'Claim link', value: current.claimLink),
-            if (current.botUsername.isNotEmpty) _InfoRow(label: 'Bot', value: '@${current.botUsername}'),
+          _InfoRow(label: 'Primary domain', value: state.primaryDomain),
+          _InfoRow(label: 'Telegram bot', value: state.botUsername.isEmpty ? '-' : '@${state.botUsername}'),
+          _InfoRow(label: 'Worker URL', value: state.workerUrl, monospace: true),
+          _InfoRow(label: 'Domains', value: state.domains.join(', ')),
+          const SizedBox(height: 10),
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: state.claimLink.isEmpty ? null : () => onOpenUrl(state.claimLink),
+                  icon: const Icon(Icons.smart_toy_rounded),
+                  label: const Text('Open Bot'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: state.claimLink.isEmpty ? null : () => onCopyText(state.claimLink),
+                  icon: const Icon(Icons.copy_rounded),
+                  label: const Text('Copy Link'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AddressManagerCard extends StatefulWidget {
+  const _AddressManagerCard({required this.state, required this.onCopyText});
+
+  final MobileSetupState state;
+  final ValueChanged<String> onCopyText;
+
+  @override
+  State<_AddressManagerCard> createState() => _AddressManagerCardState();
+}
+
+class _AddressManagerCardState extends State<_AddressManagerCard> {
+  final TextEditingController _localController = TextEditingController(text: 'test');
+  late String _domain = widget.state.domains.first;
+  String _address = '';
+
+  @override
+  void didUpdateWidget(covariant _AddressManagerCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!widget.state.domains.contains(_domain)) _domain = widget.state.domains.first;
+  }
+
+  @override
+  void dispose() {
+    _localController.dispose();
+    super.dispose();
+  }
+
+  void _generate({bool random = false}) {
+    final local = random ? _randomLocal() : InputValidators.normalizeScriptName(_localController.text, _domain).replaceFirst(RegExp(r'^telegram-tempmail-'), '');
+    if (local.isEmpty) return;
+    setState(() => _address = '$local@$_domain');
+  }
+
+  String _randomLocal() {
+    final words = <String>['amber', 'swift', 'nova', 'quiet', 'river', 'orbit'];
+    final random = Random.secure();
+    return '${words[random.nextInt(words.length)]}-${words[random.nextInt(words.length)]}-${1000 + random.nextInt(9000)}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _AppCard(
+      accentColor: AppColors.primary,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          const Text('Create temp mail', style: AppText.h2),
+          const SizedBox(height: 6),
+          const Text('Cloudflare catch-all menerima alias apa pun. Buat alamat lalu copy untuk menerima OTP/email.', style: AppText.caption),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _localController,
+            decoration: const InputDecoration(prefixIcon: Icon(Icons.alternate_email_rounded), labelText: 'Alias local-part', helperText: 'Contoh: tokopedia, login-test, apk01'),
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            initialValue: _domain,
+            items: widget.state.domains.map((domain) => DropdownMenuItem<String>(value: domain, child: Text('@$domain'))).toList(growable: false),
+            onChanged: (value) => setState(() => _domain = value ?? _domain),
+            decoration: const InputDecoration(prefixIcon: Icon(Icons.language_rounded), labelText: 'Domain'),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: <Widget>[
+              Expanded(child: FilledButton(onPressed: _generate, child: const Text('Create'))),
+              const SizedBox(width: 10),
+              Expanded(child: OutlinedButton(onPressed: () => _generate(random: true), child: const Text('Random'))),
+            ],
+          ),
+          if (_address.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 12),
+            _CodeBox(value: _address),
+            const SizedBox(height: 8),
+            FilledButton.icon(onPressed: () => widget.onCopyText(_address), icon: const Icon(Icons.copy_rounded), label: const Text('Copy temp mail')),
           ],
-          const Spacer(),
-          if (current != null) ...<Widget>[
-            FilledButton.icon(
-              onPressed: current.claimLink.isEmpty ? null : () => onOpenUrl(current.claimLink),
-              icon: const Icon(Icons.smart_toy_rounded),
-              label: const Text('Claim di Telegram'),
-            ),
-            const SizedBox(height: 8),
-            FilledButton.tonalIcon(
-              onPressed: () => onOpenUrl(current.dashboardUrl),
-              icon: const Icon(Icons.dashboard_rounded),
-              label: const Text('Buka dashboard'),
-            ),
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: current.claimLink.isEmpty ? null : () => onCopyText(current.claimLink),
-              icon: const Icon(Icons.copy_rounded),
-              label: const Text('Copy claim link'),
-            ),
-            const SizedBox(height: 8),
-          ],
-          FilledButton.icon(onPressed: onAddDomain, icon: const Icon(Icons.add_link), label: const Text('Tambah domain')),
-          const SizedBox(height: 8),
-          OutlinedButton.icon(onPressed: onReset, icon: const Icon(Icons.settings), label: const Text('Edit setup')),
+        ],
+      ),
+    );
+  }
+}
+
+class _InboxCard extends StatelessWidget {
+  const _InboxCard({required this.state, required this.onOpenUrl});
+
+  final MobileSetupState state;
+  final ValueChanged<String> onOpenUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    return _AppCard(
+      accentColor: AppColors.blue,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          const Text('Inbox & email list', style: AppText.h2),
+          const SizedBox(height: 6),
+          const Text('Inbox lengkap masih dibuka dari private web dashboard Worker. Mobile native inbox akan dibuat di update berikutnya.', style: AppText.caption),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            onPressed: () => onOpenUrl(state.dashboardUrl),
+            icon: const Icon(Icons.inbox_rounded),
+            label: const Text('Open Inbox Dashboard'),
+          ),
         ],
       ),
     );
@@ -571,44 +970,49 @@ class _AddDomainStepState extends State<_AddDomainStep> {
 
   @override
   Widget build(BuildContext context) {
-    return _Card(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          const Text('Tambah domain', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900)),
-          const SizedBox(height: 8),
-          Text('Domain harus sudah Active di Cloudflare dan satu akun dengan ${widget.primaryDomain}.'),
-          const SizedBox(height: 16),
-          _Field(controller: _domainController, label: 'Domain tambahan', icon: Icons.add_link),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            value: _force,
-            onChanged: (value) => setState(() => _force = value),
-            title: const Text('Force replace catch-all'),
-            subtitle: const Text('Aktifkan hanya kalau yakin domain test/kosong.'),
+    return _Screen(
+      scroll: true,
+      children: <Widget>[
+        const Text('Add domain', style: AppText.h1),
+        const SizedBox(height: 6),
+        Text('Domain harus Active di Cloudflare dan satu akun dengan ${widget.primaryDomain}.', style: AppText.body),
+        const SizedBox(height: AppSpacing.section),
+        _AppCard(
+          accentColor: _force ? AppColors.warning : AppColors.primary,
+          child: Column(
+            children: <Widget>[
+              TextField(
+                controller: _domainController,
+                decoration: const InputDecoration(prefixIcon: Icon(Icons.add_link_rounded), labelText: 'Domain tambahan', helperText: 'Contoh: excalibur.email'),
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                value: _force,
+                onChanged: widget.isRunning ? null : (value) => setState(() => _force = value),
+                title: const Text('Force replace catch-all / old MX', style: AppText.h2),
+                subtitle: const Text('Aktifkan hanya untuk domain test/kosong karena bisa menghapus MX lama.', style: AppText.caption),
+              ),
+            ],
           ),
-          const Spacer(),
-          FilledButton.icon(
-            onPressed: widget.isRunning
-                ? null
-                : () {
-              final domain = InputValidators.normalizeDomain(_domainController.text);
-              final valid = InputValidators.isDomain(domain);
-              if (!valid) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Domain tidak valid')));
-                return;
-              }
-              widget.onAddDomain(domain, _force);
-            },
-            icon: widget.isRunning
-                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2.4))
-                : const Icon(Icons.play_arrow_rounded),
-            label: Text(widget.isRunning ? 'Menambahkan...' : 'Tambah domain sekarang'),
-          ),
-          const SizedBox(height: 8),
-          OutlinedButton(onPressed: widget.onBack, child: const Text('Kembali')),
-        ],
-      ),
+        ),
+        FilledButton.icon(
+          onPressed: widget.isRunning
+              ? null
+              : () {
+                  final domain = InputValidators.normalizeDomain(_domainController.text);
+                  final valid = InputValidators.isDomain(domain);
+                  if (!valid) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Domain tidak valid')));
+                    return;
+                  }
+                  widget.onAddDomain(domain, _force);
+                },
+          icon: widget.isRunning ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white)) : const Icon(Icons.play_arrow_rounded),
+          label: Text(widget.isRunning ? 'Adding...' : 'Add domain now'),
+        ),
+        const SizedBox(height: 10),
+        OutlinedButton(onPressed: widget.isRunning ? null : widget.onBack, child: const Text('Back')),
+      ],
     );
   }
 }
@@ -627,9 +1031,9 @@ class _Checklist extends StatelessWidget {
             padding: const EdgeInsets.only(bottom: 10),
             child: Row(
               children: <Widget>[
-                const Icon(Icons.check_circle, color: Colors.green),
+                const Icon(Icons.check_circle_rounded, color: AppColors.success, size: 20),
                 const SizedBox(width: 10),
-                Expanded(child: Text(item, style: const TextStyle(fontWeight: FontWeight.w700))),
+                Expanded(child: Text(item, style: AppText.body.copyWith(fontWeight: FontWeight.w600))),
               ],
             ),
           ),
@@ -639,30 +1043,59 @@ class _Checklist extends StatelessWidget {
 }
 
 class _InfoRow extends StatelessWidget {
-  const _InfoRow({required this.label, required this.value});
+  const _InfoRow({required this.label, required this.value, this.monospace = false});
 
   final String label;
+  final String value;
+  final bool monospace;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(label, style: AppText.caption.copyWith(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 4),
+          SelectableText(value, style: monospace ? AppText.mono : AppText.body.copyWith(fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+        ],
+      ),
+    );
+  }
+}
+
+class _CodeBox extends StatelessWidget {
+  const _CodeBox({required this.value});
+
   final String value;
 
   @override
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFFFFFBEA),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0x33171717)),
+        color: AppColors.background,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.border),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Text(label, style: const TextStyle(color: Color(0xFF6B5F3F), fontWeight: FontWeight.w700)),
-          const SizedBox(height: 4),
-          Text(value, style: const TextStyle(fontWeight: FontWeight.w900)),
-        ],
-      ),
+      child: SelectableText(value, style: AppText.mono.copyWith(fontWeight: FontWeight.w800)),
     );
   }
+}
+
+String humanizeError(String raw) {
+  final text = raw.replaceFirst('Exception: ', '');
+  if (text.contains('Non-Cloudflare MX records exist') || text.contains('2008')) {
+    return 'Domain masih punya MX lama. Aktifkan “Ganti MX lama otomatis” jika domain ini memang untuk tempmail/test.';
+  }
+  if (text.contains('Active') || text.contains('tidak ditemukan')) {
+    return 'Domain belum Active di Cloudflare atau email/key Cloudflare salah.';
+  }
+  if (text.contains('Telegram')) {
+    return 'Token Telegram tidak valid atau bot belum siap.';
+  }
+  if (text.length > 150) return '${text.substring(0, 150)}…';
+  return text;
 }

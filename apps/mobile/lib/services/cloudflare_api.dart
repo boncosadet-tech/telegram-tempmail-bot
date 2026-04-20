@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 class CloudflareApi {
+  static const Duration _networkTimeout = Duration(seconds: 45);
   CloudflareApi({required this.email, required this.globalApiKey});
 
   final String email;
@@ -195,13 +196,13 @@ class CloudflareApi {
   }
 
   Future<String?> getKVValue(String accountId, String namespaceId, String keyName) async {
-    final client = HttpClient();
+    final client = HttpClient()..connectionTimeout = _networkTimeout;
     try {
       final request = await client.getUrl(Uri.parse('$baseUrl/accounts/$accountId/storage/kv/namespaces/$namespaceId/values/${Uri.encodeComponent(keyName)}'));
       _baseHeaders.forEach(request.headers.set);
-      final response = await request.close();
+      final response = await request.close().timeout(_networkTimeout);
       if (response.statusCode == 404) return null;
-      final raw = await utf8.decodeStream(response);
+      final raw = await utf8.decodeStream(response).timeout(_networkTimeout);
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw CloudflareApiException('Cloudflare KV GET gagal (${response.statusCode}): $raw');
       }
@@ -212,14 +213,14 @@ class CloudflareApi {
   }
 
   Future<void> putKVValue(String accountId, String namespaceId, String keyName, String value) async {
-    final client = HttpClient();
+    final client = HttpClient()..connectionTimeout = _networkTimeout;
     try {
       final request = await client.putUrl(Uri.parse('$baseUrl/accounts/$accountId/storage/kv/namespaces/$namespaceId/values/${Uri.encodeComponent(keyName)}'));
       _baseHeaders.forEach(request.headers.set);
       request.headers.contentType = ContentType('text', 'plain', charset: 'utf-8');
       request.write(value);
-      final response = await request.close();
-      final raw = await utf8.decodeStream(response);
+      final response = await request.close().timeout(_networkTimeout);
+      final raw = await utf8.decodeStream(response).timeout(_networkTimeout);
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw CloudflareApiException('Cloudflare KV PUT gagal (${response.statusCode}): $raw');
       }
@@ -235,7 +236,7 @@ class CloudflareApi {
   }
 
   Future<Map<String, dynamic>> _requestJson(Uri uri, {required String method, Object? body}) async {
-    final client = HttpClient();
+    final client = HttpClient()..connectionTimeout = _networkTimeout;
     try {
       final request = await client.openUrl(method, uri);
       _baseHeaders.forEach(request.headers.set);
@@ -243,8 +244,8 @@ class CloudflareApi {
       if (body != null) {
         request.write(jsonEncode(body));
       }
-      final response = await request.close();
-      final raw = await utf8.decodeStream(response);
+      final response = await request.close().timeout(_networkTimeout);
+      final raw = await utf8.decodeStream(response).timeout(_networkTimeout);
       final data = raw.isEmpty ? <String, dynamic>{} : jsonDecode(raw) as Map<String, dynamic>;
       if (response.statusCode < 200 || response.statusCode >= 300 || data['success'] == false) {
         throw _cloudflareException(response.statusCode, raw, data);
@@ -272,7 +273,7 @@ class CloudflareApi {
     }
     chunks.add(utf8.encode('--$boundary--\r\n'));
 
-    final client = HttpClient();
+    final client = HttpClient()..connectionTimeout = _networkTimeout;
     try {
       final request = await client.putUrl(uri);
       _baseHeaders.forEach(request.headers.set);
@@ -282,8 +283,8 @@ class CloudflareApi {
       for (final chunk in chunks) {
         request.add(chunk);
       }
-      final response = await request.close();
-      final raw = await utf8.decodeStream(response);
+      final response = await request.close().timeout(_networkTimeout);
+      final raw = await utf8.decodeStream(response).timeout(_networkTimeout);
       final data = raw.isEmpty ? <String, dynamic>{} : jsonDecode(raw) as Map<String, dynamic>;
       if (response.statusCode < 200 || response.statusCode >= 300 || data['success'] == false) {
         throw _cloudflareException(response.statusCode, raw, data, prefix: 'Cloudflare Worker upload gagal');
