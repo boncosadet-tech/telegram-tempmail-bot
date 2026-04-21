@@ -114,4 +114,101 @@ class MobileSetupState {
       d1DatabaseId: d1DatabaseId ?? this.d1DatabaseId,
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'primaryDomain': primaryDomain,
+      'scriptName': scriptName,
+      'workerUrl': workerUrl,
+      'dashboardUrl': dashboardUrl,
+      'botUsername': botUsername,
+      'domains': domains,
+      'claimLink': claimLink,
+      'accountId': accountId,
+      'zoneId': zoneId,
+      'kvNamespaceId': kvNamespaceId,
+      'd1DatabaseId': d1DatabaseId,
+    };
+  }
+
+  factory MobileSetupState.fromJson(Map<String, dynamic> json) {
+    final primaryDomain = json['primaryDomain']?.toString() ?? '';
+    final domains = (json['domains'] as List<dynamic>? ?? <dynamic>[]).map((item) => item.toString()).where((item) => item.isNotEmpty).toList(growable: true);
+    if (domains.isEmpty && primaryDomain.isNotEmpty) domains.add(primaryDomain);
+    return MobileSetupState(
+      primaryDomain: primaryDomain,
+      scriptName: json['scriptName']?.toString() ?? '',
+      workerUrl: json['workerUrl']?.toString() ?? '',
+      dashboardUrl: json['dashboardUrl']?.toString() ?? '',
+      botUsername: json['botUsername']?.toString() ?? '',
+      domains: List<String>.unmodifiable(domains),
+      claimLink: json['claimLink']?.toString() ?? '',
+      accountId: json['accountId']?.toString() ?? '',
+      zoneId: json['zoneId']?.toString() ?? '',
+      kvNamespaceId: json['kvNamespaceId']?.toString() ?? '',
+      d1DatabaseId: json['d1DatabaseId']?.toString() ?? '',
+    );
+  }
+}
+
+class StoredCredentials {
+  const StoredCredentials({
+    required this.cloudflareEmail,
+    required this.cloudflareGlobalApiKey,
+    required this.telegramBotToken,
+  });
+
+  final String cloudflareEmail;
+  final String cloudflareGlobalApiKey;
+  final String telegramBotToken;
+
+  bool get isComplete {
+    return InputValidators.isCloudflareEmail(cloudflareEmail) &&
+        InputValidators.isGlobalApiKey(cloudflareGlobalApiKey) &&
+        InputValidators.isTelegramBotToken(telegramBotToken);
+  }
+}
+
+class InboxMessage {
+  const InboxMessage({
+    required this.id,
+    required this.aliasFull,
+    required this.sender,
+    required this.subject,
+    required this.previewText,
+    required this.renderedHtml,
+    required this.otpCode,
+    required this.isOtp,
+    required this.receivedAt,
+  });
+
+  final String id;
+  final String aliasFull;
+  final String sender;
+  final String subject;
+  final String previewText;
+  final String renderedHtml;
+  final String otpCode;
+  final bool isOtp;
+  final DateTime receivedAt;
+
+  factory InboxMessage.fromD1Row(Map<String, dynamic> row) {
+    return InboxMessage(
+      id: row['id']?.toString() ?? '',
+      aliasFull: row['alias_full']?.toString() ?? '',
+      sender: row['sender']?.toString() ?? '-',
+      subject: row['subject']?.toString() ?? '(no subject)',
+      previewText: row['preview_text']?.toString() ?? '',
+      renderedHtml: row['rendered_html']?.toString() ?? '',
+      otpCode: row['otp_code']?.toString() ?? '-',
+      isOtp: row['is_otp']?.toString() == '1' || row['is_otp'] == true,
+      receivedAt: DateTime.fromMillisecondsSinceEpoch(_asInt(row['received_at']) * 1000),
+    );
+  }
+
+  static int _asInt(Object? value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value?.toString() ?? '') ?? 0;
+  }
 }

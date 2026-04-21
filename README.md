@@ -30,15 +30,15 @@ https://github.com/shizukudes/telegram-tempmail-bot/releases
 Release mobile terbaru yang sudah dibuild oleh GitHub Actions:
 
 ```text
-mobile-v0.1.4-alpha.1
+mobile-v0.1.5-alpha.1
 ```
 
 Catatan mobile alpha:
 
 - Setup Cloudflare + Telegram berjalan langsung dari APK.
 - Setelah setup, runtime tetap fully Cloudflare + Telegram; HP/Termux boleh mati.
-- Native inbox belum penuh; app membuka private dashboard Worker untuk inbox.
-- Jangan simpan/share Global API Key atau bot token di tempat publik.
+- Native inbox membaca Cloudflare D1 langsung; private dashboard Worker tetap tersedia sebagai fallback.
+- Credential dapat disimpan terenkripsi di device via Android Keystore; tetap jangan share Global API Key atau bot token di tempat publik.
 
 
 Subcommand langsung:

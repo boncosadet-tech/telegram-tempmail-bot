@@ -83,6 +83,16 @@ class CloudflareApi {
       method: 'POST',
       body: <String, dynamic>{'sql': sql, 'params': params},
     );
+    final result = response['result'];
+    if (result is List<dynamic> && result.isNotEmpty) {
+      final first = result.first;
+      if (first is Map<dynamic, dynamic>) {
+        final rows = first['results'];
+        if (rows is List<dynamic>) {
+          return rows.map((item) => Map<String, dynamic>.from(item as Map<dynamic, dynamic>)).toList(growable: false);
+        }
+      }
+    }
     return _resultList(response);
   }
 
@@ -233,6 +243,10 @@ class CloudflareApi {
     } finally {
       client.close(force: true);
     }
+  }
+
+  Future<Map<String, dynamic>> requestJson(Uri uri, {required String method, Object? body}) {
+    return _requestJson(uri, method: method, body: body);
   }
 
   Future<Map<String, dynamic>> _requestJson(Uri uri, {required String method, Object? body}) async {

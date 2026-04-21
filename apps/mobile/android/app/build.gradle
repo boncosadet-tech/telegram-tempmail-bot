@@ -11,8 +11,8 @@ if (keystorePropertiesFile.exists()) {
 }
 
 def packageName = System.getenv("ANDROID_PACKAGE_NAME") ?: "id.shizukudes.telegram_tempmail"
-def versionNameValue = System.getenv("ANDROID_VERSION_NAME") ?: "0.1.0"
-def versionCodeValue = (System.getenv("ANDROID_VERSION_CODE") ?: "1") as Integer
+def versionNameValue = System.getenv("ANDROID_VERSION_NAME") ?: "0.1.5"
+def versionCodeValue = (System.getenv("ANDROID_VERSION_CODE") ?: "5") as Integer
 
 android {
     namespace = "id.shizukudes.telegram_tempmail"

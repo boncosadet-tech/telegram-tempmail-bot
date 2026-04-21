@@ -1,13 +1,17 @@
+import 'dart:async';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 
 import '../../core/models/setup_models.dart';
 import '../../core/theme/app_design.dart';
 import '../../core/validators/input_validators.dart';
+import '../../services/inbox_service.dart';
 import '../../services/native_actions.dart';
 import '../../services/provisioning_service.dart';
+import '../../services/secure_config_store.dart';
 
 class MobileHomePage extends StatefulWidget {
   const MobileHomePage({super.key});
@@ -18,6 +22,7 @@ class MobileHomePage extends StatefulWidget {
 
 class _MobileHomePageState extends State<MobileHomePage> {
   final ProvisioningService _provisioning = const ProvisioningService();
+  final SecureConfigStore _secureStore = const SecureConfigStore();
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _globalKeyController = TextEditingController();
   final TextEditingController _botTokenController = TextEditingController();
@@ -28,9 +33,17 @@ class _MobileHomePageState extends State<MobileHomePage> {
   bool _replaceExistingMxRecords = false;
   bool _hideSecrets = true;
   bool _addingDomain = false;
+  bool _restoringState = true;
+  StoredCredentials? _storedCredentials;
   int _page = 0;
   List<ProvisioningStep> _steps = const ProvisioningService().initialSteps();
   MobileSetupState? _setupState;
+
+  @override
+  void initState() {
+    super.initState();
+    _restoreSavedState();
+  }
 
   @override
   void dispose() {
@@ -56,6 +69,33 @@ class _MobileHomePageState extends State<MobileHomePage> {
     setState(() => _page = page);
   }
 
+  Future<void> _restoreSavedState() async {
+    try {
+      final state = await _secureStore.readSetupState();
+      final credentials = await _secureStore.readCredentials();
+      if (!mounted) return;
+      if (state != null) {
+        setState(() {
+          _setupState = state;
+          _storedCredentials = credentials;
+          _domainController.text = state.primaryDomain;
+          _scriptController.text = state.scriptName;
+          if (credentials != null) {
+            _emailController.text = credentials.cloudflareEmail;
+            _globalKeyController.text = credentials.cloudflareGlobalApiKey;
+            _botTokenController.text = credentials.telegramBotToken;
+            _saveCredentials = true;
+          }
+          _page = 3;
+        });
+      }
+    } on Object catch (error) {
+      debugPrint('restore setup state failed: $error');
+    } finally {
+      if (mounted) setState(() => _restoringState = false);
+    }
+  }
+
   Future<void> _runSetup() async {
     if (!_draft.isValid) {
       _showSnack('Form belum valid. Cek email, API key, bot token, dan domain.');
@@ -73,6 +113,7 @@ class _MobileHomePageState extends State<MobileHomePage> {
       });
       error = update.error;
       if (update.state != null) {
+        await _persistSetupState(update.state!);
         await Future<void>.delayed(const Duration(milliseconds: 450));
         if (!mounted) return;
         _go(3);
@@ -85,6 +126,21 @@ class _MobileHomePageState extends State<MobileHomePage> {
     }
     _showSnack('Setup selesai. Buka claim link di Telegram.');
     if (_setupState != null) _go(3);
+  }
+
+  Future<void> _persistSetupState(MobileSetupState state) async {
+    await _secureStore.saveSetupState(state);
+    if (_draft.saveCredentials) {
+      await _secureStore.saveCredentials(_draft);
+      _storedCredentials = StoredCredentials(
+        cloudflareEmail: _draft.cloudflareEmail.trim(),
+        cloudflareGlobalApiKey: _draft.cloudflareGlobalApiKey.trim(),
+        telegramBotToken: _draft.telegramBotToken.trim(),
+      );
+    } else {
+      await _secureStore.clearCredentials();
+      _storedCredentials = null;
+    }
   }
 
   Future<void> _openUrl(String url) async {
@@ -104,6 +160,24 @@ class _MobileHomePageState extends State<MobileHomePage> {
     }
   }
 
+  Future<void> _saveCurrentCredentials() async {
+    if (!_draft.isValid) {
+      _showSnack('Credential belum valid. Isi email Cloudflare, Global API Key, bot token, domain, dan script name.');
+      _go(1);
+      return;
+    }
+    await _secureStore.saveCredentials(_draft);
+    setState(() {
+      _storedCredentials = StoredCredentials(
+        cloudflareEmail: _draft.cloudflareEmail.trim(),
+        cloudflareGlobalApiKey: _draft.cloudflareGlobalApiKey.trim(),
+        telegramBotToken: _draft.telegramBotToken.trim(),
+      );
+      _saveCredentials = true;
+    });
+    _showSnack('Credential terenkripsi disimpan di device.');
+  }
+
   Future<void> _addDomain(String domain, bool force) async {
     final state = _setupState;
     if (state == null) {
@@ -118,6 +192,7 @@ class _MobileHomePageState extends State<MobileHomePage> {
         domain: domain,
         force: force,
       );
+      await _secureStore.saveSetupState(next);
       if (!mounted) return;
       setState(() => _setupState = next);
       _showSnack('Domain ${InputValidators.normalizeDomain(domain)} berhasil ditambahkan.');
@@ -136,6 +211,13 @@ class _MobileHomePageState extends State<MobileHomePage> {
 
   @override
   Widget build(BuildContext context) {
+    if (_restoringState) {
+      return const Scaffold(
+        body: SafeArea(
+          child: Center(child: CircularProgressIndicator()),
+        ),
+      );
+    }
     return Scaffold(
       body: AnimatedContainer(
         duration: const Duration(milliseconds: 450),
@@ -199,8 +281,10 @@ class _MobileHomePageState extends State<MobileHomePage> {
         ),
       3 => _DashboardStep(
           state: _setupState,
+          credentials: _storedCredentials,
           onAddDomain: () => _go(4),
           onReset: () => _go(1),
+          onSaveCredentials: _saveCurrentCredentials,
           onOpenUrl: _openUrl,
           onCopyText: _copyText,
         ),
@@ -511,7 +595,7 @@ class _CredentialsStep extends StatelessWidget {
                 value: saveCredentials,
                 onChanged: onToggleSave,
                 title: const Text('Simpan credential aman di device', style: AppText.h2),
-                subtitle: const Text('Belum aktif sampai secure storage selesai; credential tidak disimpan permanen.', style: AppText.caption),
+                subtitle: const Text('Credential disimpan terenkripsi via Android Keystore untuk inbox native.', style: AppText.caption),
               ),
               const Divider(height: 18),
               SwitchListTile(
@@ -753,15 +837,19 @@ class _StepTileState extends State<_StepTile> with SingleTickerProviderStateMixi
 class _DashboardStep extends StatelessWidget {
   const _DashboardStep({
     required this.state,
+    required this.credentials,
     required this.onAddDomain,
     required this.onReset,
+    required this.onSaveCredentials,
     required this.onOpenUrl,
     required this.onCopyText,
   });
 
   final MobileSetupState? state;
+  final StoredCredentials? credentials;
   final VoidCallback onAddDomain;
   final VoidCallback onReset;
+  final VoidCallback onSaveCredentials;
   final ValueChanged<String> onOpenUrl;
   final ValueChanged<String> onCopyText;
 
@@ -790,9 +878,9 @@ class _DashboardStep extends StatelessWidget {
             ),
           )
         else ...<Widget>[
-          _SummaryCard(state: current, onOpenUrl: onOpenUrl, onCopyText: onCopyText),
+          _SummaryCard(state: current, credentials: credentials, onOpenUrl: onOpenUrl, onCopyText: onCopyText),
           _AddressManagerCard(state: current, onCopyText: onCopyText),
-          _InboxCard(state: current, onOpenUrl: onOpenUrl),
+          _InboxCard(state: current, credentials: credentials, onOpenUrl: onOpenUrl, onSaveCredentials: onSaveCredentials),
           Row(
             children: <Widget>[
               Expanded(child: FilledButton.icon(onPressed: onAddDomain, icon: const Icon(Icons.add_link_rounded), label: const Text('Add domain'))),
@@ -807,9 +895,10 @@ class _DashboardStep extends StatelessWidget {
 }
 
 class _SummaryCard extends StatelessWidget {
-  const _SummaryCard({required this.state, required this.onOpenUrl, required this.onCopyText});
+  const _SummaryCard({required this.state, required this.credentials, required this.onOpenUrl, required this.onCopyText});
 
   final MobileSetupState state;
+  final StoredCredentials? credentials;
   final ValueChanged<String> onOpenUrl;
   final ValueChanged<String> onCopyText;
 
@@ -832,6 +921,7 @@ class _SummaryCard extends StatelessWidget {
           _InfoRow(label: 'Telegram bot', value: state.botUsername.isEmpty ? '-' : '@${state.botUsername}'),
           _InfoRow(label: 'Worker URL', value: state.workerUrl, monospace: true),
           _InfoRow(label: 'Domains', value: state.domains.join(', ')),
+          _InfoRow(label: 'Secure storage', value: credentials == null ? 'Credential belum tersimpan' : 'Credential terenkripsi aktif'),
           const SizedBox(height: 10),
           Row(
             children: <Widget>[
@@ -939,30 +1029,242 @@ class _AddressManagerCardState extends State<_AddressManagerCard> {
   }
 }
 
-class _InboxCard extends StatelessWidget {
-  const _InboxCard({required this.state, required this.onOpenUrl});
+class _InboxCard extends StatefulWidget {
+  const _InboxCard({required this.state, required this.credentials, required this.onOpenUrl, required this.onSaveCredentials});
 
   final MobileSetupState state;
+  final StoredCredentials? credentials;
   final ValueChanged<String> onOpenUrl;
+  final VoidCallback onSaveCredentials;
+
+  @override
+  State<_InboxCard> createState() => _InboxCardState();
+}
+
+class _InboxCardState extends State<_InboxCard> {
+  final InboxService _inbox = const InboxService();
+  List<InboxMessage> _messages = const <InboxMessage>[];
+  InboxMessage? _selected;
+  bool _loading = false;
+  String _error = '';
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.credentials != null) {
+      unawaited(_refresh());
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _InboxCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.credentials == null && widget.credentials != null) {
+      unawaited(_refresh());
+    }
+  }
+
+  Future<void> _refresh() async {
+    final credentials = widget.credentials;
+    if (credentials == null) return;
+    setState(() {
+      _loading = true;
+      _error = '';
+    });
+    try {
+      final messages = await _inbox.listMessages(state: widget.state, credentials: credentials);
+      if (!mounted) return;
+      setState(() {
+        _messages = messages;
+        if (_selected != null && !messages.any((message) => message.id == _selected!.id)) _selected = null;
+      });
+    } on Object catch (error) {
+      if (!mounted) return;
+      setState(() => _error = humanizeError(error.toString()));
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _deleteSelected() async {
+    final credentials = widget.credentials;
+    final selected = _selected;
+    if (credentials == null || selected == null) return;
+    setState(() => _loading = true);
+    try {
+      await _inbox.deleteMessage(state: widget.state, credentials: credentials, id: selected.id);
+      if (!mounted) return;
+      setState(() => _selected = null);
+      await _refresh();
+    } on Object catch (error) {
+      if (!mounted) return;
+      setState(() => _error = humanizeError(error.toString()));
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _purgeOtp() async {
+    final credentials = widget.credentials;
+    if (credentials == null) return;
+    setState(() => _loading = true);
+    try {
+      await _inbox.purgeOtp(state: widget.state, credentials: credentials);
+      await _refresh();
+    } on Object catch (error) {
+      if (!mounted) return;
+      setState(() => _error = humanizeError(error.toString()));
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final credentials = widget.credentials;
     return _AppCard(
-      accentColor: AppColors.blue,
+      accentColor: credentials == null ? AppColors.warning : AppColors.blue,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          const Text('Inbox & email list', style: AppText.h2),
+          Row(
+            children: <Widget>[
+              const Expanded(child: Text('Native inbox', style: AppText.h2)),
+              if (_loading) const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2.3)),
+            ],
+          ),
           const SizedBox(height: 6),
-          const Text('Inbox lengkap masih dibuka dari private web dashboard Worker. Mobile native inbox akan dibuat di update berikutnya.', style: AppText.caption),
+          Text(
+            credentials == null
+                ? 'Credential belum tersimpan. Simpan credential terenkripsi untuk membaca D1 langsung dari app.'
+                : 'Inbox dibaca langsung dari Cloudflare D1. Web dashboard tetap tersedia sebagai fallback.',
+            style: AppText.caption,
+          ),
           const SizedBox(height: 12),
+          if (credentials == null) ...<Widget>[
+            FilledButton.icon(onPressed: widget.onSaveCredentials, icon: const Icon(Icons.lock_rounded), label: const Text('Save credential securely')),
+            const SizedBox(height: 8),
+          ] else ...<Widget>[
+            Row(
+              children: <Widget>[
+                Expanded(child: FilledButton.icon(onPressed: _loading ? null : _refresh, icon: const Icon(Icons.refresh_rounded), label: const Text('Refresh'))),
+                const SizedBox(width: 10),
+                Expanded(child: OutlinedButton.icon(onPressed: _loading ? null : _purgeOtp, icon: const Icon(Icons.cleaning_services_rounded), label: const Text('Purge OTP'))),
+              ],
+            ),
+            if (_error.isNotEmpty) ...<Widget>[
+              const SizedBox(height: 10),
+              Text(_error, style: AppText.caption.copyWith(color: AppColors.error, fontWeight: FontWeight.w700)),
+            ],
+            const SizedBox(height: 12),
+            if (_messages.isEmpty && !_loading && _error.isEmpty)
+              const _EmptyState(text: 'Belum ada email di D1 inbox. Kirim email test ke alias tempmail lalu refresh.')
+            else
+              for (final message in _messages.take(8)) _InboxMessageTile(message: message, selected: _selected?.id == message.id, onTap: () => setState(() => _selected = message)),
+            if (_selected != null) ...<Widget>[
+              const SizedBox(height: 8),
+              _MessageDetail(message: _selected!, onDelete: _loading ? null : _deleteSelected),
+            ],
+          ],
           OutlinedButton.icon(
-            onPressed: () => onOpenUrl(state.dashboardUrl),
-            icon: const Icon(Icons.inbox_rounded),
-            label: const Text('Open Inbox Dashboard'),
+            onPressed: () => widget.onOpenUrl(widget.state.dashboardUrl),
+            icon: const Icon(Icons.open_in_browser_rounded),
+            label: const Text('Open Web Dashboard'),
           ),
         ],
       ),
+    );
+  }
+}
+
+class _InboxMessageTile extends StatelessWidget {
+  const _InboxMessageTile({required this.message, required this.selected, required this.onTap});
+
+  final InboxMessage message;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        border: Border.all(color: selected ? AppColors.primary : AppColors.border),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: ListTile(
+        onTap: onTap,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        title: Text(message.subject, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w800)),
+        subtitle: Text('${message.sender}\n${message.previewText}', maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.caption),
+        trailing: message.isOtp ? _Pill(text: message.otpCode == '-' ? 'OTP' : message.otpCode, color: AppColors.success) : null,
+      ),
+    );
+  }
+}
+
+class _MessageDetail extends StatelessWidget {
+  const _MessageDetail({required this.message, required this.onDelete});
+
+  final InboxMessage message;
+  final VoidCallback? onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final body = message.renderedHtml.isNotEmpty ? stripHtml(message.renderedHtml) : message.previewText;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.background,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(message.aliasFull, style: AppText.caption.copyWith(fontWeight: FontWeight.w800)),
+          const SizedBox(height: 4),
+          Text(message.subject, style: AppText.h2.copyWith(fontSize: 16)),
+          const SizedBox(height: 6),
+          Text('From: ${message.sender}', style: AppText.caption),
+          if (message.isOtp) Text('OTP: ${message.otpCode}', style: AppText.body.copyWith(color: AppColors.success, fontWeight: FontWeight.w900)),
+          const SizedBox(height: 8),
+          Text(body.isEmpty ? '(no preview)' : body, style: AppText.body),
+          const SizedBox(height: 10),
+          OutlinedButton.icon(onPressed: onDelete, icon: const Icon(Icons.delete_outline_rounded), label: const Text('Delete email')),
+        ],
+      ),
+    );
+  }
+}
+
+class _EmptyState extends StatelessWidget {
+  const _EmptyState({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Center(child: Text(text, textAlign: TextAlign.center, style: AppText.caption)),
+    );
+  }
+}
+
+class _Pill extends StatelessWidget {
+  const _Pill({required this.text, required this.color});
+
+  final String text;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(color: color.withValues(alpha: .12), borderRadius: BorderRadius.circular(999)),
+      child: Text(text, style: AppText.caption.copyWith(color: color, fontWeight: FontWeight.w900)),
     );
   }
 }
@@ -1111,6 +1413,15 @@ class _CodeBox extends StatelessWidget {
   }
 }
 
+String stripHtml(String raw) {
+  return raw
+      .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n')
+      .replaceAll(RegExp(r'</p>', caseSensitive: false), '\n')
+      .replaceAll(RegExp(r'<[^>]+>'), ' ')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+}
+
 String humanizeError(String raw) {
   final text = raw.replaceFirst('Exception: ', '');
   if (text.contains('Non-Cloudflare MX records exist') || text.contains('2008')) {
@@ -1121,6 +1432,9 @@ String humanizeError(String raw) {
   }
   if (text.contains('Telegram')) {
     return 'Token Telegram tidak valid atau bot belum siap.';
+  }
+  if (text.contains('D1') || text.contains('database')) {
+    return 'Inbox D1 belum siap atau credential Cloudflare tidak punya akses. Cek setup dan simpan credential ulang.';
   }
   if (text.length > 150) return '${text.substring(0, 150)}…';
   return text;

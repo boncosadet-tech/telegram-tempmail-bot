@@ -2,14 +2,14 @@
 
 This mobile app is the Android/APK frontend for the existing `telegram-tempmail-bot` npm package.
 
-Current status: **real provisioning MVP**. The app can run the Cloudflare + Telegram setup flow directly from the Android device without a local Termux process after setup.
+Current status: **production-alpha provisioning and inbox MVP**. The app can run the Cloudflare + Telegram setup flow directly from the Android device, persist setup state with Android Keystore-backed secure storage, and read inbox data natively from Cloudflare D1.
 
 ## Layers
 
-- **Flutter UI**: welcome screen, credential form, setup progress timeline, management dashboard, and add-domain screen.
+- **Flutter UI**: welcome screen, credential form, setup progress timeline, management dashboard, add-domain screen, and native inbox screen.
 - **Dart service clients**: Cloudflare API and Telegram Bot API calls through `dart:io` `HttpClient`.
 - **Provisioning orchestration**: `ProvisioningService` emits progress updates for Telegram validation, Cloudflare zone lookup, KV, D1, Worker upload, secrets, Email Routing DNS, catch-all routing, and Telegram webhook setup.
-- **Kotlin native helper**: method channel for opening URLs and copying text.
+- **Kotlin native helper**: method channel for opening URLs, copying text, and encrypted setup/credential storage with Android Keystore.
 - **Worker runtime asset**: `apps/mobile/assets/worker/main.js` is bundled into the APK and uploaded to Cloudflare Workers during setup.
 - **Existing npm package**: remains the source-of-truth for CLI operations, Worker runtime development, npm distribution, and mocked service tests.
 
@@ -48,20 +48,21 @@ The mobile provisioning flow currently performs:
 - No credential is committed to the repository.
 - Release signing uses GitHub Actions secrets.
 - User Cloudflare and Telegram secrets are sent directly from the device to Cloudflare/Telegram APIs.
-- The “save credentials” UI toggle is intentionally non-persistent until Android secure storage is implemented.
+- The “save credentials” UI toggle persists credentials through Android Keystore-backed encryption on the device.
 - Global API Key has broad Cloudflare account power; users should rotate any key that was shared or exposed.
+- Uninstalling or clearing app data removes the locally stored encrypted setup state and credentials.
 
 ## Current limitations
 
-- Native mobile inbox is not implemented yet; the app opens the Worker-hosted private dashboard for inbox management.
-- Persistent credential storage is not implemented yet.
+- Native inbox is an alpha D1 reader and supports list/detail/delete/purge OTP; the Worker-hosted dashboard remains the fallback.
 - Verify/admin parity with every npm CLI action is still incomplete.
 - The mobile APK uses a Dart port of the provisioning flow; npm CLI remains the canonical implementation for advanced operator actions.
+- Cloudflare quota/rate limits and any previously exposed credentials remain operator responsibilities.
 
 ## Next development targets
 
-1. Android secure storage for optional credential persistence.
-2. Native inbox list/detail UI backed by Worker dashboard APIs.
-3. Mobile verify flow equivalent to `telegram-tempmail-verify`.
+1. Mobile verify flow equivalent to `telegram-tempmail-verify`.
+2. Richer native HTML rendering for email detail.
+3. Safer scoped Cloudflare API token mode.
 4. Safer conflict-resolution UI for catch-all and existing MX records.
 5. Screenshots and visual regression references for release QA.

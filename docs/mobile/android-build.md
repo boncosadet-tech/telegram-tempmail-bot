@@ -53,8 +53,8 @@ Repository variables:
 
 ```text
 ANDROID_PACKAGE_NAME=id.shizukudes.telegram_tempmail
-ANDROID_VERSION_NAME=0.1.0
-ANDROID_VERSION_CODE=1
+ANDROID_VERSION_NAME=0.1.5
+ANDROID_VERSION_CODE=5
 ```
 
 The release workflow runs:
@@ -66,14 +66,17 @@ The release workflow runs:
 5. `flutter analyze`
 6. `flutter test`
 7. `flutter build apk --release`
-8. upload `telegram-tempmail-release-apk/app-release.apk`
+8. calculate APK SHA256
+9. auto-create/update GitHub Release for `mobile-v*` tags
+10. upload `app-release.apk` as a release asset
+11. upload `telegram-tempmail-release-apk/app-release.apk` as a workflow artifact
 
 ## Current release channel
 
-Latest mobile alpha release should be published as a GitHub Release on:
+Latest mobile alpha release is published automatically from `mobile-v*` tags. Current release channel:
 
 ```text
-mobile-v0.1.4-alpha.1
+mobile-v0.1.5-alpha.1
 ```
 
 APK asset name:
@@ -106,3 +109,5 @@ Set the base64 output as `ANDROID_KEYSTORE_BASE64`.
 - `apps/mobile/android/key.properties` is ignored.
 - `apps/mobile/android/app/*.jks` and `*.keystore` are ignored.
 - Release signing secrets must stay in GitHub repository secrets only.
+- Release workflow needs `contents: write` permission to create/update GitHub Releases.
+- APK release notes include SHA256; verify downloaded APK against that digest.
