@@ -221,6 +221,78 @@ class ProvisioningService {
   }
 
 
+  Future<MobileSetupState> connectExisting(SetupDraft draft) async {
+    if (!draft.isControlValid) {
+      throw ProvisioningException('Isi Cloudflare email, Global API Key, domain, dan Worker script name untuk control existing. Bot token boleh kosong.');
+    }
+
+    final domain = draft.normalizedDomain;
+    final scriptName = draft.effectiveScriptName;
+    final cf = CloudflareApi(email: draft.cloudflareEmail.trim(), globalApiKey: draft.cloudflareGlobalApiKey.trim());
+    final zone = await cf.getActiveZone(domain);
+    final zoneId = zone['id']?.toString() ?? '';
+    final accountId = (zone['account'] as Map<dynamic, dynamic>?)?['id']?.toString() ?? '';
+    if (zoneId.isEmpty || accountId.isEmpty) {
+      throw ProvisioningException('Cloudflare zone tidak punya zone/account id.');
+    }
+
+    final accountSubdomain = await cf.getAccountWorkersSubdomain(accountId);
+    final settings = await cf.getWorkerSettings(accountId, scriptName);
+    final bindingIds = _extractWorkerBindingIds(settings);
+    final kvNamespaceId = bindingIds['kv'] ?? '';
+    final d1DatabaseId = bindingIds['d1'] ?? '';
+    if (d1DatabaseId.isEmpty) {
+      throw ProvisioningException('Worker "$scriptName" tidak punya D1 binding MAIL_DB. Tidak bisa membuka native inbox.');
+    }
+
+    final domains = <String>{domain};
+    if (kvNamespaceId.isNotEmpty) {
+      final kvRaw = await cf.getKVValue(accountId, kvNamespaceId, 'domains');
+      if (kvRaw != null && kvRaw.trim().isNotEmpty) {
+        try {
+          final parsed = jsonDecode(kvRaw);
+          if (parsed is List<dynamic>) {
+            for (final value in parsed) {
+              final normalized = InputValidators.normalizeDomain(value.toString());
+              if (normalized.isNotEmpty) domains.add(normalized);
+            }
+          }
+        } on Object {
+          // Keep primary domain only if remote KV is malformed.
+        }
+      }
+    }
+
+    var botUsername = '';
+    if (InputValidators.isTelegramBotToken(draft.telegramBotToken)) {
+      try {
+        final bot = await TelegramApi(draft.telegramBotToken.trim()).getMe();
+        botUsername = bot['username']?.toString() ?? '';
+      } on Object {
+        botUsername = '';
+      }
+    }
+
+    final workerUrl = 'https://$scriptName.$accountSubdomain.workers.dev';
+    final orderedDomains = domains.toList(growable: false)..sort();
+    orderedDomains.remove(domain);
+    orderedDomains.insert(0, domain);
+    return MobileSetupState(
+      primaryDomain: domain,
+      scriptName: scriptName,
+      workerUrl: workerUrl,
+      dashboardUrl: '$workerUrl/app',
+      botUsername: botUsername,
+      domains: orderedDomains,
+      claimLink: botUsername.isEmpty ? '' : 'https://t.me/$botUsername?start=claim',
+      accountId: accountId,
+      zoneId: zoneId,
+      kvNamespaceId: kvNamespaceId,
+      d1DatabaseId: d1DatabaseId,
+    );
+  }
+
+
   Future<MobileSetupState> addDomain({
     required SetupDraft draft,
     required MobileSetupState state,
@@ -303,6 +375,25 @@ class ProvisioningService {
       domains: orderedDomains,
       kvNamespaceId: namespaceId,
     );
+  }
+
+  static Map<String, String> _extractWorkerBindingIds(Map<String, dynamic> settings) {
+    final result = <String, String>{};
+    final bindings = settings['bindings'];
+    if (bindings is! List<dynamic>) return result;
+    for (final binding in bindings) {
+      if (binding is! Map<dynamic, dynamic>) continue;
+      final item = Map<String, dynamic>.from(binding);
+      final name = item['name']?.toString() ?? '';
+      final type = item['type']?.toString() ?? '';
+      if (type == 'kv_namespace' && name == 'STATE_KV') {
+        result['kv'] = item['namespace_id']?.toString() ?? '';
+      }
+      if ((type == 'd1' || type == 'd1_database') && name == 'MAIL_DB') {
+        result['d1'] = (item['database_id'] ?? item['id'])?.toString() ?? '';
+      }
+    }
+    return result;
   }
 
   static String normalizeCatchAllTarget(Map<String, dynamic> catchAll) {

@@ -36,7 +36,8 @@ mobile-v0.1.5-alpha.1
 Catatan mobile alpha:
 
 - Setup Cloudflare + Telegram berjalan langsung dari APK.
-- Setelah setup, runtime tetap fully Cloudflare + Telegram; HP/Termux boleh mati.
+- Mode Control Existing bisa login/kontrol Worker lama tanpa deploy ulang.
+- Setelah setup/control, runtime tetap fully Cloudflare + Telegram; HP/Termux boleh mati.
 - Native inbox membaca Cloudflare D1 langsung; private dashboard Worker tetap tersedia sebagai fallback.
 - Credential dapat disimpan terenkripsi di device via Android Keystore; tetap jangan share Global API Key atau bot token di tempat publik.
 

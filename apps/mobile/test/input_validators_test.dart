@@ -37,4 +37,19 @@ void main() {
     expect(draft.replaceExistingMxRecords, isTrue);
     expect(draft.isValid, isTrue);
   });
+
+  test('SetupDraft supports control mode without Telegram token', () {
+    const draft = SetupDraft(
+      cloudflareEmail: 'owner@example.com',
+      cloudflareGlobalApiKey: 'abcdefghijklmnopqrstuvwxyz',
+      telegramBotToken: '',
+      domain: 'example.com',
+      scriptName: 'telegram-tempmail',
+      saveCredentials: true,
+      replaceExistingMxRecords: false,
+    );
+
+    expect(draft.isValid, isFalse);
+    expect(draft.isControlValid, isTrue);
+  });
 }

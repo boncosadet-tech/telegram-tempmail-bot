@@ -2,7 +2,7 @@
 
 This mobile app is the Android/APK frontend for the existing `telegram-tempmail-bot` npm package.
 
-Current status: **production-alpha provisioning and inbox MVP**. The app can run the Cloudflare + Telegram setup flow directly from the Android device, persist setup state with Android Keystore-backed secure storage, and read inbox data natively from Cloudflare D1.
+Current status: **production-alpha provisioning, control, and inbox MVP**. The app can deploy/redeploy from the Android device, connect to an existing Worker without redeploy, persist setup state with Android Keystore-backed secure storage, and read inbox data natively from Cloudflare D1.
 
 ## Layers
 
@@ -42,6 +42,17 @@ The mobile provisioning flow currently performs:
 10. Set catch-all Email Routing rule to the Worker.
 11. Configure Telegram webhook.
 12. Produce dashboard URL and owner claim link.
+
+## Control existing flow
+
+The app can also attach to an already deployed Worker without changing Cloudflare resources:
+
+1. Validate Cloudflare email, Global API Key, domain, and Worker script name.
+2. Resolve the active zone/account.
+3. Inspect Worker settings and recover `STATE_KV` / `MAIL_DB` bindings.
+4. Read configured domains from KV when available.
+5. Persist the recovered setup state and credentials locally.
+6. Enable native inbox/control actions without uploading Worker code or rotating Telegram webhook secrets.
 
 ## Security model
 

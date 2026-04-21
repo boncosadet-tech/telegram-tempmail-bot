@@ -30,6 +30,13 @@ class SetupDraft {
         InputValidators.isDomain(domain) &&
         InputValidators.isScriptName(effectiveScriptName);
   }
+
+  bool get isControlValid {
+    return InputValidators.isCloudflareEmail(cloudflareEmail) &&
+        InputValidators.isGlobalApiKey(cloudflareGlobalApiKey) &&
+        InputValidators.isDomain(domain) &&
+        InputValidators.isScriptName(effectiveScriptName);
+  }
 }
 
 enum ProvisioningStepStatus { pending, running, ok, failed }
@@ -164,9 +171,10 @@ class StoredCredentials {
 
   bool get isComplete {
     return InputValidators.isCloudflareEmail(cloudflareEmail) &&
-        InputValidators.isGlobalApiKey(cloudflareGlobalApiKey) &&
-        InputValidators.isTelegramBotToken(telegramBotToken);
+        InputValidators.isGlobalApiKey(cloudflareGlobalApiKey);
   }
+
+  bool get hasTelegramBotToken => InputValidators.isTelegramBotToken(telegramBotToken);
 }
 
 class InboxMessage {

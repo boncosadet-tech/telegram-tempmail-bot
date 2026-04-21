@@ -32,6 +32,7 @@ class _MobileHomePageState extends State<MobileHomePage> {
   bool _replaceExistingMxRecords = false;
   bool _hideSecrets = true;
   bool _addingDomain = false;
+  bool _connectingExisting = false;
   bool _restoringState = true;
   StoredCredentials? _storedCredentials;
   int _page = 0;
@@ -159,6 +160,36 @@ class _MobileHomePageState extends State<MobileHomePage> {
     }
   }
 
+  Future<void> _controlExisting() async {
+    if (!_draft.isControlValid) {
+      _showSnack('Control existing butuh Cloudflare email, Global API Key, domain, dan script name. Bot token boleh kosong.');
+      return;
+    }
+    setState(() => _connectingExisting = true);
+    try {
+      final state = await _provisioning.connectExisting(_draft);
+      await _secureStore.saveSetupState(state);
+      await _secureStore.saveCredentials(_draft);
+      if (!mounted) return;
+      setState(() {
+        _setupState = state;
+        _storedCredentials = StoredCredentials(
+          cloudflareEmail: _draft.cloudflareEmail.trim(),
+          cloudflareGlobalApiKey: _draft.cloudflareGlobalApiKey.trim(),
+          telegramBotToken: _draft.telegramBotToken.trim(),
+        );
+        _saveCredentials = true;
+      });
+      _showSnack('Connected. App sekarang kontrol deployment existing tanpa redeploy.');
+      _go(3);
+    } on Object catch (error) {
+      if (!mounted) return;
+      _showSnack('Control existing gagal. ${humanizeError(error.toString())}');
+    } finally {
+      if (mounted) setState(() => _connectingExisting = false);
+    }
+  }
+
   Future<void> _saveCurrentCredentials() async {
     if (!_draft.isValid) {
       _showSnack('Credential belum valid. Isi email Cloudflare, Global API Key, bot token, domain, dan script name.');
@@ -270,9 +301,11 @@ class _MobileHomePageState extends State<MobileHomePage> {
           hideSecrets: _hideSecrets,
           onToggleSave: (value) => setState(() => _saveCredentials = value),
           onToggleReplaceMx: (value) => setState(() => _replaceExistingMxRecords = value),
+          isConnectingExisting: _connectingExisting,
           onToggleSecretMode: () => setState(() => _hideSecrets = !_hideSecrets),
           onBack: () => _go(0),
           onSubmit: _runSetup,
+          onControlExisting: _controlExisting,
         ),
       2 => _ProgressStep(
           steps: _steps,
@@ -511,11 +544,13 @@ class _CredentialsStep extends StatelessWidget {
     required this.saveCredentials,
     required this.replaceExistingMxRecords,
     required this.hideSecrets,
+    required this.isConnectingExisting,
     required this.onToggleSave,
     required this.onToggleReplaceMx,
     required this.onToggleSecretMode,
     required this.onBack,
     required this.onSubmit,
+    required this.onControlExisting,
   });
 
   final TextEditingController emailController;
@@ -526,11 +561,13 @@ class _CredentialsStep extends StatelessWidget {
   final bool saveCredentials;
   final bool replaceExistingMxRecords;
   final bool hideSecrets;
+  final bool isConnectingExisting;
   final ValueChanged<bool> onToggleSave;
   final ValueChanged<bool> onToggleReplaceMx;
   final VoidCallback onToggleSecretMode;
   final VoidCallback onBack;
   final VoidCallback onSubmit;
+  final VoidCallback onControlExisting;
 
   @override
   Widget build(BuildContext context) {
@@ -539,7 +576,7 @@ class _CredentialsStep extends StatelessWidget {
       children: <Widget>[
         const Text('Configuration', style: AppText.h1),
         const SizedBox(height: 6),
-        const Text('Masukkan credential yang dipakai langsung dari device ke Cloudflare dan Telegram.', style: AppText.body),
+        const Text('Pilih Deploy untuk setup/redeploy, atau Control Existing untuk login dan kontrol Worker yang sudah ada tanpa deploy ulang.', style: AppText.body),
         const SizedBox(height: AppSpacing.section),
         _AppCard(
           accentColor: AppColors.primary,
@@ -563,10 +600,10 @@ class _CredentialsStep extends StatelessWidget {
               _Field(
                 controller: botTokenController,
                 label: 'Telegram Bot Token',
-                helper: 'Token bot dari @BotFather.',
+                helper: 'Wajib untuk Deploy. Opsional untuk Control Existing/native inbox.',
                 icon: Icons.smart_toy_rounded,
                 obscure: hideSecrets,
-                validator: InputValidators.isTelegramBotToken,
+                validator: (value) => value.trim().isEmpty || InputValidators.isTelegramBotToken(value),
               ),
               _Field(
                 controller: domainController,
@@ -619,8 +656,16 @@ class _CredentialsStep extends StatelessWidget {
           children: <Widget>[
             Expanded(child: OutlinedButton(onPressed: onBack, child: const Text('Back'))),
             const SizedBox(width: 12),
-            Expanded(child: FilledButton(onPressed: onSubmit, child: const Text('Continue'))),
+            Expanded(child: FilledButton(onPressed: onSubmit, child: const Text('Deploy / Redeploy'))),
           ],
+        ),
+        const SizedBox(height: 10),
+        OutlinedButton.icon(
+          onPressed: isConnectingExisting ? null : onControlExisting,
+          icon: isConnectingExisting
+              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2.3))
+              : const Icon(Icons.login_rounded),
+          label: Text(isConnectingExisting ? 'Connecting...' : 'Control Existing (No Deploy)'),
         ),
       ],
     );

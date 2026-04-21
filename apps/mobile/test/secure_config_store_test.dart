@@ -72,6 +72,7 @@ void main() {
 
     expect(credentials, isNotNull);
     expect(credentials!.isComplete, isTrue);
+    expect(credentials.hasTelegramBotToken, isTrue);
     expect(credentials.cloudflareEmail, 'owner@example.com');
   });
 }
