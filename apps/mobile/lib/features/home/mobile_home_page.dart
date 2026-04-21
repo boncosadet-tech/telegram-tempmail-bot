@@ -17,7 +17,6 @@ class MobileHomePage extends StatefulWidget {
 }
 
 class _MobileHomePageState extends State<MobileHomePage> {
-  final PageController _pageController = PageController();
   final ProvisioningService _provisioning = const ProvisioningService();
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _globalKeyController = TextEditingController();
@@ -35,7 +34,6 @@ class _MobileHomePageState extends State<MobileHomePage> {
 
   @override
   void dispose() {
-    _pageController.dispose();
     _emailController.dispose();
     _globalKeyController.dispose();
     _botTokenController.dispose();
@@ -56,11 +54,6 @@ class _MobileHomePageState extends State<MobileHomePage> {
 
   void _go(int page) {
     setState(() => _page = page);
-    _pageController.animateToPage(
-      page,
-      duration: const Duration(milliseconds: 320),
-      curve: Curves.easeOutCubic,
-    );
   }
 
   Future<void> _runSetup() async {
@@ -156,44 +149,21 @@ class _MobileHomePageState extends State<MobileHomePage> {
                 children: <Widget>[
                   _TopBar(page: _page),
                   Expanded(
-                    child: PageView(
-                      controller: _pageController,
-                      physics: const NeverScrollableScrollPhysics(),
-                      children: <Widget>[
-                        _WelcomeStep(onStart: () => _go(1)),
-                        _CredentialsStep(
-                          emailController: _emailController,
-                          globalKeyController: _globalKeyController,
-                          botTokenController: _botTokenController,
-                          domainController: _domainController,
-                          scriptController: _scriptController,
-                          saveCredentials: _saveCredentials,
-                          replaceExistingMxRecords: _replaceExistingMxRecords,
-                          hideSecrets: _hideSecrets,
-                          onToggleSave: (value) => setState(() => _saveCredentials = value),
-                          onToggleReplaceMx: (value) => setState(() => _replaceExistingMxRecords = value),
-                          onToggleSecretMode: () => setState(() => _hideSecrets = !_hideSecrets),
-                          onBack: () => _go(0),
-                          onSubmit: _runSetup,
-                        ),
-                        _ProgressStep(
-                          steps: _steps,
-                          onContinue: _setupState == null ? null : () => _go(3),
-                        ),
-                        _DashboardStep(
-                          state: _setupState,
-                          onAddDomain: () => _go(4),
-                          onReset: () => _go(1),
-                          onOpenUrl: _openUrl,
-                          onCopyText: _copyText,
-                        ),
-                        _AddDomainStep(
-                          primaryDomain: _setupState?.primaryDomain ?? _draft.normalizedDomain,
-                          isRunning: _addingDomain,
-                          onAddDomain: _addDomain,
-                          onBack: () => _go(3),
-                        ),
-                      ],
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 260),
+                      switchInCurve: Curves.easeOutCubic,
+                      switchOutCurve: Curves.easeInCubic,
+                      transitionBuilder: (child, animation) {
+                        final slide = Tween<Offset>(begin: const Offset(.04, 0), end: Offset.zero).animate(animation);
+                        return FadeTransition(
+                          opacity: animation,
+                          child: SlideTransition(position: slide, child: child),
+                        );
+                      },
+                      child: KeyedSubtree(
+                        key: ValueKey<int>(_page),
+                        child: _buildPage(),
+                      ),
                     ),
                   ),
                 ],
@@ -203,6 +173,45 @@ class _MobileHomePageState extends State<MobileHomePage> {
         ),
       ),
     );
+  }
+
+  Widget _buildPage() {
+    return switch (_page) {
+      0 => _WelcomeStep(onStart: () => _go(1)),
+      1 => _CredentialsStep(
+          emailController: _emailController,
+          globalKeyController: _globalKeyController,
+          botTokenController: _botTokenController,
+          domainController: _domainController,
+          scriptController: _scriptController,
+          saveCredentials: _saveCredentials,
+          replaceExistingMxRecords: _replaceExistingMxRecords,
+          hideSecrets: _hideSecrets,
+          onToggleSave: (value) => setState(() => _saveCredentials = value),
+          onToggleReplaceMx: (value) => setState(() => _replaceExistingMxRecords = value),
+          onToggleSecretMode: () => setState(() => _hideSecrets = !_hideSecrets),
+          onBack: () => _go(0),
+          onSubmit: _runSetup,
+        ),
+      2 => _ProgressStep(
+          steps: _steps,
+          onContinue: _setupState == null ? null : () => _go(3),
+        ),
+      3 => _DashboardStep(
+          state: _setupState,
+          onAddDomain: () => _go(4),
+          onReset: () => _go(1),
+          onOpenUrl: _openUrl,
+          onCopyText: _copyText,
+        ),
+      4 => _AddDomainStep(
+          primaryDomain: _setupState?.primaryDomain ?? _draft.normalizedDomain,
+          isRunning: _addingDomain,
+          onAddDomain: _addDomain,
+          onBack: () => _go(3),
+        ),
+      _ => _WelcomeStep(onStart: () => _go(1)),
+    };
   }
 }
 
@@ -382,17 +391,7 @@ class _WelcomeStep extends StatelessWidget {
           textAlign: TextAlign.center,
           style: AppText.body.copyWith(color: AppColors.textSecondary),
         ),
-        const SizedBox(height: 24),
-        const _AppCard(
-          accentColor: AppColors.primary,
-          child: _Checklist(items: <String>[
-            'Cloudflare Free compatible',
-            'No local server after setup',
-            'Multi-domain temp mail routing',
-            'Telegram bot + web dashboard',
-          ]),
-        ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 18),
         FilledButton.icon(
           onPressed: onStart,
           icon: const Icon(Icons.arrow_forward_rounded),
@@ -404,7 +403,16 @@ class _WelcomeStep extends StatelessWidget {
           icon: const Icon(Icons.settings_rounded),
           label: const Text('Open Configuration'),
         ),
-        const SizedBox(height: 18),
+        const SizedBox(height: 14),
+        const _AppCard(
+          accentColor: AppColors.primary,
+          child: _Checklist(items: <String>[
+            'Cloudflare Free compatible',
+            'No local server after setup',
+            'Multi-domain temp mail routing',
+            'Telegram bot + web dashboard',
+          ]),
+        ),
       ],
     );
   }
