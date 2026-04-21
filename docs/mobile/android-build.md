@@ -53,8 +53,8 @@ Repository variables:
 
 ```text
 ANDROID_PACKAGE_NAME=id.shizukudes.telegram_tempmail
-ANDROID_VERSION_NAME=0.1.5
-ANDROID_VERSION_CODE=5
+ANDROID_VERSION_NAME=0.1.6
+ANDROID_VERSION_CODE=6
 ```
 
 The release workflow runs:
@@ -76,7 +76,7 @@ The release workflow runs:
 Latest mobile alpha release is published automatically from `mobile-v*` tags. Current release channel:
 
 ```text
-mobile-v0.1.5-alpha.1
+mobile-v0.1.6-alpha.1
 ```
 
 APK asset name:
