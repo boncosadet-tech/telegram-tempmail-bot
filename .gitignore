@@ -14,3 +14,7 @@ apps/mobile/android/local.properties
 apps/mobile/android/key.properties
 apps/mobile/android/app/*.jks
 apps/mobile/android/app/*.keystore
+
+# OMX runtime/autopilot scratch artifacts
+.omx/context/
+.omx/plans/autopilot-*.md

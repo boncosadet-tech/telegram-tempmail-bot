@@ -17,6 +17,30 @@ Runtime-nya berjalan di Cloudflare. Setelah setup selesai, Termux/laptop/VPS lok
 npx telegram-tempmail-bot
 ```
 
+Versi npm saat ini mengikuti `latest` di npm registry. Release mobile APK dipublikasikan terpisah di GitHub Releases.
+
+## Android APK alpha
+
+APK Android tersedia dari halaman GitHub Releases:
+
+```text
+https://github.com/shizukudes/telegram-tempmail-bot/releases
+```
+
+Release mobile terbaru yang sudah dibuild oleh GitHub Actions:
+
+```text
+mobile-v0.1.4-alpha.1
+```
+
+Catatan mobile alpha:
+
+- Setup Cloudflare + Telegram berjalan langsung dari APK.
+- Setelah setup, runtime tetap fully Cloudflare + Telegram; HP/Termux boleh mati.
+- Native inbox belum penuh; app membuka private dashboard Worker untuk inbox.
+- Jangan simpan/share Global API Key atau bot token di tempat publik.
+
+
 Subcommand langsung:
 
 ```bash
@@ -83,6 +107,10 @@ Sebelum setup, siapkan:
    - dibuat lewat BotFather
 6. **Node.js 20+**
    - kalau pakai `npx`, tidak perlu clone repo
+
+## License
+
+MIT. Lihat `LICENSE`.
 
 ## Dependencies yang dipasang
 

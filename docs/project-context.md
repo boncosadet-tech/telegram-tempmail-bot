@@ -9,7 +9,7 @@ The current implementation supports:
 - Interactive CLI app
 - Setup flow for Cloudflare Worker, KV, Email Routing, and Telegram webhook
 - Verification flow for deployed infrastructure
-- Admin flow for owner reset and webhook secret rotation
+- Admin flow for owner reset, webhook secret rotation, and adding onboarded domains
 - npm package distribution
 - GitHub Actions CI and publish workflows
 
@@ -32,6 +32,8 @@ The current implementation supports:
 ### State
 
 - Cloudflare KV stores the owner record under the key `owner`
+- Cloudflare KV stores configured app domains under the key `domains`
+- D1 stores inbox messages and rendered HTML previews
 - Local setup metadata is stored at `.tempmail/setup-state.json`
 
 ## Runtime vs local dependency
@@ -66,11 +68,12 @@ A local Termux session is not part of the runtime path. It is only used for oper
 - Health validation with `verify`
 - Owner reset with `admin --action reset-owner`
 - Webhook secret rotation with `admin --action rotate-secret`
+- Add onboarded Cloudflare domain with `admin --action add-domain`
 
 ## Constraints
 
 - One owner per deployment
-- One domain per deployment
+- One primary domain per deployment, with optional additional domains on the same Cloudflare account
 - Worker catch-all path is the main routing mechanism
 - Cloudflare authentication currently uses account email plus Global API Key
 - Telegram bot must have a username for the claim link flow
@@ -87,4 +90,4 @@ A local Termux session is not part of the runtime path. It is only used for oper
 - MIME parsing is intentionally basic
 - Large attachment handling is out of scope
 - Some external-system edge cases are only covered manually, not exhaustively in tests
-- npm publish still shows a non-fatal warning related to the `bin` field
+- Mobile native inbox and secure credential storage are still planned follow-ups

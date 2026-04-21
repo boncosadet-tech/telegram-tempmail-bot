@@ -8,13 +8,24 @@ GitHub Actions workflow:
 .github/workflows/builddebug.yaml
 ```
 
-Manual run: GitHub Actions > Build Android Debug APK > Run workflow.
+Triggers:
+
+- push to `master` when `apps/mobile/**` or the debug workflow changes
+- pull request to `master` touching mobile files
+- manual `workflow_dispatch`
 
 Output artifact:
 
 ```text
 telegram-tempmail-debug-apk/app-debug.apk
 ```
+
+The debug workflow runs:
+
+1. `flutter pub get`
+2. `flutter analyze`
+3. `flutter test`
+4. `flutter build apk --debug`
 
 ## Release APK
 
@@ -23,6 +34,11 @@ GitHub Actions workflow:
 ```text
 .github/workflows/buildrelease.yaml
 ```
+
+Triggers:
+
+- tag push matching `mobile-v*`
+- manual `workflow_dispatch`
 
 Required repository secrets:
 
@@ -39,6 +55,31 @@ Repository variables:
 ANDROID_PACKAGE_NAME=id.shizukudes.telegram_tempmail
 ANDROID_VERSION_NAME=0.1.0
 ANDROID_VERSION_CODE=1
+```
+
+The release workflow runs:
+
+1. validate signing secrets
+2. restore `android/app/upload-keystore.jks`
+3. write `android/key.properties`
+4. `flutter pub get`
+5. `flutter analyze`
+6. `flutter test`
+7. `flutter build apk --release`
+8. upload `telegram-tempmail-release-apk/app-release.apk`
+
+## Current release channel
+
+Latest mobile alpha release should be published as a GitHub Release on:
+
+```text
+mobile-v0.1.4-alpha.1
+```
+
+APK asset name:
+
+```text
+app-release.apk
 ```
 
 ## Generate signing secret locally
@@ -60,6 +101,8 @@ base64 -w 0 upload-keystore.jks
 
 Set the base64 output as `ANDROID_KEYSTORE_BASE64`.
 
-## Current repo setup
+## Safety checks
 
-The repository is prepared to read signing data from GitHub secrets and write `apps/mobile/android/key.properties` during the release workflow.
+- `apps/mobile/android/key.properties` is ignored.
+- `apps/mobile/android/app/*.jks` and `*.keystore` are ignored.
+- Release signing secrets must stay in GitHub repository secrets only.

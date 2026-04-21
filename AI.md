@@ -13,8 +13,9 @@ The package is intended for a single-owner deployment per domain.
 
 ## Current Product Model
 
-- One Cloudflare zone per deployment
-- One Worker catch-all route for `*@domain`
+- One primary Cloudflare zone per deployment
+- Optional additional domains on the same Cloudflare account
+- One Worker catch-all route per configured domain
 - One Telegram bot owner
 - One owner claim flow via `/start claim`
 - Virtual aliases generated from `/new`
@@ -39,7 +40,7 @@ This is not a mailbox host. It is a forwarding and notification system.
 - `src/cli/verify.js`
   Validate deployment state
 - `src/cli/admin.js`
-  Administrative actions such as owner reset and webhook secret rotation
+  Administrative actions such as owner reset, webhook secret rotation, and adding onboarded domains
 - `src/main.js`
   Worker runtime for Telegram webhook handling and inbound email processing
 
@@ -78,6 +79,7 @@ npx --package telegram-tempmail-bot telegram-tempmail-admin
 ## Release Notes
 
 - npm package is published from GitHub Actions
+- Android APK builds run from GitHub Actions
 - CI runs on pushes and pull requests to `master`
 - npm publish workflow runs on:
   - tag push `v*`
@@ -88,6 +90,7 @@ npx --package telegram-tempmail-bot telegram-tempmail-admin
 
 - MIME parsing is intentionally lightweight
 - Attachment processing is not implemented
+- Mobile native inbox and secure credential storage are not implemented yet
 - Cloudflare Email Routing size limits still apply
 - npm CLI emits a warning about `bin` field cleanup during publish, even though installed commands work
 

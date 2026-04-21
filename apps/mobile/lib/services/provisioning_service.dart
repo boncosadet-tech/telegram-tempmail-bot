@@ -305,23 +305,6 @@ class ProvisioningService {
     );
   }
 
-  Stream<List<ProvisioningStep>> dryRunSetup(SetupDraft draft) async* {
-    final steps = initialSteps().toList();
-    for (var index = 0; index < steps.length; index += 1) {
-      steps[index] = steps[index].copyWith(
-        status: ProvisioningStepStatus.running,
-        detail: 'Preparing ${draft.normalizedDomain}',
-      );
-      yield List<ProvisioningStep>.unmodifiable(steps);
-      await Future<void>.delayed(const Duration(milliseconds: 180));
-      steps[index] = steps[index].copyWith(
-        status: ProvisioningStepStatus.ok,
-        detail: 'Ready for API integration',
-      );
-      yield List<ProvisioningStep>.unmodifiable(steps);
-    }
-  }
-
   static String normalizeCatchAllTarget(Map<String, dynamic> catchAll) {
     final actions = catchAll['actions'];
     if (actions is! List<dynamic>) return '';
