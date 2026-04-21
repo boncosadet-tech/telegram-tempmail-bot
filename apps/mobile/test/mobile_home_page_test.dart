@@ -5,6 +5,7 @@ import 'package:telegram_tempmail_mobile/app.dart';
 void main() {
   testWidgets('welcome CTA is tappable and opens configuration step', (tester) async {
     await tester.pumpWidget(const TempMailMobileApp());
+    await tester.pumpAndSettle();
 
     expect(find.text('Private TempMail'), findsWidgets);
     expect(find.text('Get Started'), findsOneWidget);
@@ -19,6 +20,7 @@ void main() {
 
   testWidgets('secondary welcome CTA is tappable and opens configuration step', (tester) async {
     await tester.pumpWidget(const TempMailMobileApp());
+    await tester.pumpAndSettle();
 
     await tester.tap(find.widgetWithText(OutlinedButton, 'Open Configuration'));
     await tester.pumpAndSettle();
