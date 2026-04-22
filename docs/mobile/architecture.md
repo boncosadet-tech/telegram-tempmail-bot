@@ -2,11 +2,11 @@
 
 This mobile app is the Android/APK frontend for the existing `telegram-tempmail-bot` npm package.
 
-Current status: **production-alpha provisioning, control, and inbox MVP**. The app can deploy/redeploy from the Android device, connect to an existing Worker without redeploy, persist setup state with Android Keystore-backed secure storage, and read inbox data natively from Cloudflare D1.
+Current status: **production-alpha provisioning, control, and polished inbox MVP**. The app can deploy/redeploy from the Android device, connect to an existing Worker without redeploy, persist setup state with Android Keystore-backed secure storage, and read inbox data natively from Cloudflare D1.
 
 ## Layers
 
-- **Flutter UI**: welcome screen, credential form, setup progress timeline, management dashboard, add-domain screen, and native inbox screen.
+- **Flutter UI**: welcome screen, credential form, setup progress timeline, management dashboard, add-domain screen, and polished native inbox with search, action menu, empty/error/loading states, and detail bottom sheet.
 - **Dart service clients**: Cloudflare API and Telegram Bot API calls through `dart:io` `HttpClient`.
 - **Provisioning orchestration**: `ProvisioningService` emits progress updates for Telegram validation, Cloudflare zone lookup, KV, D1, Worker upload, secrets, Email Routing DNS, catch-all routing, and Telegram webhook setup.
 - **Kotlin native helper**: method channel for opening URLs, copying text, and encrypted setup/credential storage with Android Keystore.
@@ -65,7 +65,7 @@ The app can also attach to an already deployed Worker without changing Cloudflar
 
 ## Current limitations
 
-- Native inbox is an alpha D1 reader and supports list/detail/delete/purge OTP; the Worker-hosted dashboard remains the fallback.
+- Native inbox is an alpha D1 reader and supports search, list/detail bottom sheet, delete confirmation, purge OTP confirmation, loading/empty/error states; the Worker-hosted dashboard remains the fallback.
 - Verify/admin parity with every npm CLI action is still incomplete.
 - The mobile APK uses a Dart port of the provisioning flow; npm CLI remains the canonical implementation for advanced operator actions.
 - Cloudflare quota/rate limits and any previously exposed credentials remain operator responsibilities.

@@ -30,7 +30,7 @@ https://github.com/shizukudes/telegram-tempmail-bot/releases
 Release mobile terbaru yang sudah dibuild oleh GitHub Actions:
 
 ```text
-mobile-v0.1.6-alpha.1
+mobile-v0.1.7-alpha.1
 ```
 
 Catatan mobile alpha:

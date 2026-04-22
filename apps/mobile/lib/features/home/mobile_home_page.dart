@@ -7,7 +7,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import '../../core/models/setup_models.dart';
 import '../../core/theme/app_design.dart';
 import '../../core/validators/input_validators.dart';
-import '../../services/inbox_service.dart';
+import 'inbox_panel.dart';
 import '../../services/native_actions.dart';
 import '../../services/provisioning_service.dart';
 import '../../services/secure_config_store.dart';
@@ -924,7 +924,7 @@ class _DashboardStep extends StatelessWidget {
         else ...<Widget>[
           _SummaryCard(state: current, credentials: credentials, onOpenUrl: onOpenUrl, onCopyText: onCopyText),
           _AddressManagerCard(state: current, onCopyText: onCopyText),
-          _InboxCard(state: current, credentials: credentials, onOpenUrl: onOpenUrl, onSaveCredentials: onSaveCredentials),
+          _InboxCard(state: current, credentials: credentials, onOpenUrl: onOpenUrl, onCopyText: onCopyText, onSaveCredentials: onSaveCredentials),
           Row(
             children: <Widget>[
               Expanded(child: FilledButton.icon(onPressed: onAddDomain, icon: const Icon(Icons.add_link_rounded), label: const Text('Add domain'))),
@@ -1073,242 +1073,29 @@ class _AddressManagerCardState extends State<_AddressManagerCard> {
   }
 }
 
-class _InboxCard extends StatefulWidget {
-  const _InboxCard({required this.state, required this.credentials, required this.onOpenUrl, required this.onSaveCredentials});
+class _InboxCard extends StatelessWidget {
+  const _InboxCard({
+    required this.state,
+    required this.credentials,
+    required this.onOpenUrl,
+    required this.onCopyText,
+    required this.onSaveCredentials,
+  });
 
   final MobileSetupState state;
   final StoredCredentials? credentials;
   final ValueChanged<String> onOpenUrl;
+  final ValueChanged<String> onCopyText;
   final VoidCallback onSaveCredentials;
 
   @override
-  State<_InboxCard> createState() => _InboxCardState();
-}
-
-class _InboxCardState extends State<_InboxCard> {
-  final InboxService _inbox = const InboxService();
-  List<InboxMessage> _messages = const <InboxMessage>[];
-  InboxMessage? _selected;
-  bool _loading = false;
-  String _error = '';
-
-  @override
-  void initState() {
-    super.initState();
-    if (widget.credentials != null) {
-      unawaited(_refresh());
-    }
-  }
-
-  @override
-  void didUpdateWidget(covariant _InboxCard oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.credentials == null && widget.credentials != null) {
-      unawaited(_refresh());
-    }
-  }
-
-  Future<void> _refresh() async {
-    final credentials = widget.credentials;
-    if (credentials == null) return;
-    setState(() {
-      _loading = true;
-      _error = '';
-    });
-    try {
-      final messages = await _inbox.listMessages(state: widget.state, credentials: credentials);
-      if (!mounted) return;
-      setState(() {
-        _messages = messages;
-        if (_selected != null && !messages.any((message) => message.id == _selected!.id)) _selected = null;
-      });
-    } on Object catch (error) {
-      if (!mounted) return;
-      setState(() => _error = humanizeError(error.toString()));
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _deleteSelected() async {
-    final credentials = widget.credentials;
-    final selected = _selected;
-    if (credentials == null || selected == null) return;
-    setState(() => _loading = true);
-    try {
-      await _inbox.deleteMessage(state: widget.state, credentials: credentials, id: selected.id);
-      if (!mounted) return;
-      setState(() => _selected = null);
-      await _refresh();
-    } on Object catch (error) {
-      if (!mounted) return;
-      setState(() => _error = humanizeError(error.toString()));
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _purgeOtp() async {
-    final credentials = widget.credentials;
-    if (credentials == null) return;
-    setState(() => _loading = true);
-    try {
-      await _inbox.purgeOtp(state: widget.state, credentials: credentials);
-      await _refresh();
-    } on Object catch (error) {
-      if (!mounted) return;
-      setState(() => _error = humanizeError(error.toString()));
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final credentials = widget.credentials;
-    return _AppCard(
-      accentColor: credentials == null ? AppColors.warning : AppColors.blue,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Row(
-            children: <Widget>[
-              const Expanded(child: Text('Native inbox', style: AppText.h2)),
-              if (_loading) const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2.3)),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            credentials == null
-                ? 'Credential belum tersimpan. Simpan credential terenkripsi untuk membaca D1 langsung dari app.'
-                : 'Inbox dibaca langsung dari Cloudflare D1. Web dashboard tetap tersedia sebagai fallback.',
-            style: AppText.caption,
-          ),
-          const SizedBox(height: 12),
-          if (credentials == null) ...<Widget>[
-            FilledButton.icon(onPressed: widget.onSaveCredentials, icon: const Icon(Icons.lock_rounded), label: const Text('Save credential securely')),
-            const SizedBox(height: 8),
-          ] else ...<Widget>[
-            Row(
-              children: <Widget>[
-                Expanded(child: FilledButton.icon(onPressed: _loading ? null : _refresh, icon: const Icon(Icons.refresh_rounded), label: const Text('Refresh'))),
-                const SizedBox(width: 10),
-                Expanded(child: OutlinedButton.icon(onPressed: _loading ? null : _purgeOtp, icon: const Icon(Icons.cleaning_services_rounded), label: const Text('Purge OTP'))),
-              ],
-            ),
-            if (_error.isNotEmpty) ...<Widget>[
-              const SizedBox(height: 10),
-              Text(_error, style: AppText.caption.copyWith(color: AppColors.error, fontWeight: FontWeight.w700)),
-            ],
-            const SizedBox(height: 12),
-            if (_messages.isEmpty && !_loading && _error.isEmpty)
-              const _EmptyState(text: 'Belum ada email di D1 inbox. Kirim email test ke alias tempmail lalu refresh.')
-            else
-              for (final message in _messages.take(8)) _InboxMessageTile(message: message, selected: _selected?.id == message.id, onTap: () => setState(() => _selected = message)),
-            if (_selected != null) ...<Widget>[
-              const SizedBox(height: 8),
-              _MessageDetail(message: _selected!, onDelete: _loading ? null : _deleteSelected),
-            ],
-          ],
-          OutlinedButton.icon(
-            onPressed: () => widget.onOpenUrl(widget.state.dashboardUrl),
-            icon: const Icon(Icons.open_in_browser_rounded),
-            label: const Text('Open Web Dashboard'),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _InboxMessageTile extends StatelessWidget {
-  const _InboxMessageTile({required this.message, required this.selected, required this.onTap});
-
-  final InboxMessage message;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        border: Border.all(color: selected ? AppColors.primary : AppColors.border),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: ListTile(
-        onTap: onTap,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-        title: Text(message.subject, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w800)),
-        subtitle: Text('${message.sender}\n${message.previewText}', maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.caption),
-        trailing: message.isOtp ? _Pill(text: message.otpCode == '-' ? 'OTP' : message.otpCode, color: AppColors.success) : null,
-      ),
-    );
-  }
-}
-
-class _MessageDetail extends StatelessWidget {
-  const _MessageDetail({required this.message, required this.onDelete});
-
-  final InboxMessage message;
-  final VoidCallback? onDelete;
-
-  @override
-  Widget build(BuildContext context) {
-    final body = message.renderedHtml.isNotEmpty ? stripHtml(message.renderedHtml) : message.previewText;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppColors.background,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Text(message.aliasFull, style: AppText.caption.copyWith(fontWeight: FontWeight.w800)),
-          const SizedBox(height: 4),
-          Text(message.subject, style: AppText.h2.copyWith(fontSize: 16)),
-          const SizedBox(height: 6),
-          Text('From: ${message.sender}', style: AppText.caption),
-          if (message.isOtp) Text('OTP: ${message.otpCode}', style: AppText.body.copyWith(color: AppColors.success, fontWeight: FontWeight.w900)),
-          const SizedBox(height: 8),
-          Text(body.isEmpty ? '(no preview)' : body, style: AppText.body),
-          const SizedBox(height: 10),
-          OutlinedButton.icon(onPressed: onDelete, icon: const Icon(Icons.delete_outline_rounded), label: const Text('Delete email')),
-        ],
-      ),
-    );
-  }
-}
-
-class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.text});
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      child: Center(child: Text(text, textAlign: TextAlign.center, style: AppText.caption)),
-    );
-  }
-}
-
-class _Pill extends StatelessWidget {
-  const _Pill({required this.text, required this.color});
-
-  final String text;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(color: color.withValues(alpha: .12), borderRadius: BorderRadius.circular(999)),
-      child: Text(text, style: AppText.caption.copyWith(color: color, fontWeight: FontWeight.w900)),
+    return InboxPanel(
+      state: state,
+      credentials: credentials,
+      onOpenUrl: onOpenUrl,
+      onCopyText: onCopyText,
+      onSaveCredentials: onSaveCredentials,
     );
   }
 }
@@ -1455,15 +1242,6 @@ class _CodeBox extends StatelessWidget {
       child: SelectableText(value, style: AppText.mono.copyWith(fontWeight: FontWeight.w800)),
     );
   }
-}
-
-String stripHtml(String raw) {
-  return raw
-      .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n')
-      .replaceAll(RegExp(r'</p>', caseSensitive: false), '\n')
-      .replaceAll(RegExp(r'<[^>]+>'), ' ')
-      .replaceAll(RegExp(r'\s+'), ' ')
-      .trim();
 }
 
 String humanizeError(String raw) {
