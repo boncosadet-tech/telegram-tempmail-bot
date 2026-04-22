@@ -922,7 +922,9 @@ class _StepTileState extends State<_StepTile> with SingleTickerProviderStateMixi
   }
 }
 
-class _DashboardStep extends StatelessWidget {
+enum _DashboardSection { overview, inbox, addresses, manage }
+
+class _DashboardStep extends StatefulWidget {
   const _DashboardStep({
     required this.state,
     required this.credentials,
@@ -942,8 +944,15 @@ class _DashboardStep extends StatelessWidget {
   final ValueChanged<String> onCopyText;
 
   @override
+  State<_DashboardStep> createState() => _DashboardStepState();
+}
+
+class _DashboardStepState extends State<_DashboardStep> {
+  _DashboardSection _section = _DashboardSection.overview;
+
+  @override
   Widget build(BuildContext context) {
-    final current = state;
+    final current = widget.state;
     return _Screen(
       scroll: true,
       children: <Widget>[
@@ -955,41 +964,141 @@ class _DashboardStep extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                const AppSectionHeader(
-                  icon: Icons.warning_amber_rounded,
-                  title: 'Belum ada setup state',
-                  subtitle: 'Jalankan deploy baru atau control existing untuk mulai mengelola tempmail.',
-                ),
-                FilledButton(onPressed: onReset, child: const Text('Open setup')),
+                const AppSectionHeader(icon: Icons.warning_amber_rounded, title: 'Belum ada setup state', subtitle: 'Jalankan deploy baru atau control existing untuk mulai mengelola tempmail.'),
+                FilledButton(onPressed: widget.onReset, child: const Text('Open setup')),
               ],
             ),
           )
         else ...<Widget>[
-          _SummaryCard(state: current, credentials: credentials, onOpenUrl: onOpenUrl, onCopyText: onCopyText),
-          AppSurfaceCard(
-            accentColor: AppColors.primary,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                const AppSectionHeader(
-                  icon: Icons.bolt_rounded,
-                  title: 'Quick actions',
-                  subtitle: 'Aksi utama untuk bot, domain, setup, dan dashboard web.',
-                ),
-                AppActionTile(icon: Icons.smart_toy_rounded, title: 'Open Telegram bot', subtitle: current.botUsername.isEmpty ? 'Bot username belum tersedia' : '@${current.botUsername}', onTap: current.claimLink.isEmpty ? null : () => onOpenUrl(current.claimLink), color: AppColors.primary),
-                const SizedBox(height: 10),
-                AppActionTile(icon: Icons.add_link_rounded, title: 'Add domain', subtitle: 'Hubungkan domain Cloudflare lain ke Worker yang sama.', onTap: onAddDomain, color: AppColors.blue),
-                const SizedBox(height: 10),
-                AppActionTile(icon: Icons.settings_rounded, title: 'Edit setup', subtitle: 'Ubah credential, mode deploy/control, atau opsi DNS.', onTap: onReset, color: AppColors.pending),
-                const SizedBox(height: 10),
-                AppActionTile(icon: Icons.open_in_browser_rounded, title: 'Web dashboard fallback', subtitle: current.dashboardUrl, onTap: () => onOpenUrl(current.dashboardUrl), color: AppColors.success),
-              ],
-            ),
-          ),
-          _AddressManagerCard(state: current, onCopyText: onCopyText),
-          _InboxCard(state: current, credentials: credentials, onOpenUrl: onOpenUrl, onCopyText: onCopyText, onSaveCredentials: onSaveCredentials),
+          _DashboardSectionBar(value: _section, onChanged: (value) => setState(() => _section = value)),
+          const SizedBox(height: AppSpacing.section),
+          switch (_section) {
+            _DashboardSection.overview => Column(children: <Widget>[_SummaryCard(state: current, credentials: widget.credentials, onOpenUrl: widget.onOpenUrl, onCopyText: widget.onCopyText), _QuickActionsCard(current: current, onAddDomain: widget.onAddDomain, onReset: widget.onReset, onOpenUrl: widget.onOpenUrl)]),
+            _DashboardSection.inbox => _InboxCard(state: current, credentials: widget.credentials, onOpenUrl: widget.onOpenUrl, onCopyText: widget.onCopyText, onSaveCredentials: widget.onSaveCredentials),
+            _DashboardSection.addresses => _AddressManagerCard(state: current, onCopyText: widget.onCopyText),
+            _DashboardSection.manage => _ManageCard(current: current, onAddDomain: widget.onAddDomain, onReset: widget.onReset, onOpenUrl: widget.onOpenUrl, onCopyText: widget.onCopyText),
+          },
         ],
       ],
+    );
+  }
+}
+
+class _DashboardSectionBar extends StatelessWidget {
+  const _DashboardSectionBar({required this.value, required this.onChanged});
+
+  final _DashboardSection value;
+  final ValueChanged<_DashboardSection> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return AppSurfaceCard(
+      marginBottom: 0,
+      padding: 10,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: <Widget>[
+            _DashboardSectionButton(icon: Icons.dashboard_rounded, label: 'Overview', selected: value == _DashboardSection.overview, onTap: () => onChanged(_DashboardSection.overview)),
+            _DashboardSectionButton(icon: Icons.inbox_rounded, label: 'Inbox', selected: value == _DashboardSection.inbox, onTap: () => onChanged(_DashboardSection.inbox)),
+            _DashboardSectionButton(icon: Icons.alternate_email_rounded, label: 'Address', selected: value == _DashboardSection.addresses, onTap: () => onChanged(_DashboardSection.addresses)),
+            _DashboardSectionButton(icon: Icons.tune_rounded, label: 'Manage', selected: value == _DashboardSection.manage, onTap: () => onChanged(_DashboardSection.manage)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DashboardSectionButton extends StatelessWidget {
+  const _DashboardSectionButton({required this.icon, required this.label, required this.selected, required this.onTap});
+
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = selected ? AppColors.primary : AppColors.textSecondary;
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: Material(
+        color: selected ? AppColors.primary.withValues(alpha: .13) : Colors.transparent,
+        borderRadius: BorderRadius.circular(999),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(999),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+            decoration: BoxDecoration(borderRadius: BorderRadius.circular(999), border: Border.all(color: selected ? AppColors.primary.withValues(alpha: .32) : AppColors.border)),
+            child: Row(mainAxisSize: MainAxisSize.min, children: <Widget>[Icon(icon, size: 18, color: color), const SizedBox(width: 7), Text(label, style: AppText.caption.copyWith(color: color, fontWeight: FontWeight.w900))]),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _QuickActionsCard extends StatelessWidget {
+  const _QuickActionsCard({required this.current, required this.onAddDomain, required this.onReset, required this.onOpenUrl});
+
+  final MobileSetupState current;
+  final VoidCallback onAddDomain;
+  final VoidCallback onReset;
+  final ValueChanged<String> onOpenUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    return AppSurfaceCard(
+      accentColor: AppColors.primary,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          const AppSectionHeader(icon: Icons.bolt_rounded, title: 'Quick actions', subtitle: 'Aksi utama dipisah dari inbox/address agar dashboard tidak terasa sempit.'),
+          AppActionTile(icon: Icons.smart_toy_rounded, title: 'Open Telegram bot', subtitle: current.botUsername.isEmpty ? 'Bot username belum tersedia' : '@${current.botUsername}', onTap: current.claimLink.isEmpty ? null : () => onOpenUrl(current.claimLink), color: AppColors.primary),
+          const SizedBox(height: 10),
+          AppActionTile(icon: Icons.inbox_rounded, title: 'Open web dashboard', subtitle: current.dashboardUrl, onTap: () => onOpenUrl(current.dashboardUrl), color: AppColors.success),
+          const SizedBox(height: 10),
+          AppActionTile(icon: Icons.add_link_rounded, title: 'Add domain', subtitle: 'Kelola dari tab Manage kalau butuh domain baru.', onTap: onAddDomain, color: AppColors.blue),
+          const SizedBox(height: 10),
+          AppActionTile(icon: Icons.settings_rounded, title: 'Edit setup', subtitle: 'Ubah credential atau mode deploy/control.', onTap: onReset, color: AppColors.pending),
+        ],
+      ),
+    );
+  }
+}
+
+class _ManageCard extends StatelessWidget {
+  const _ManageCard({required this.current, required this.onAddDomain, required this.onReset, required this.onOpenUrl, required this.onCopyText});
+
+  final MobileSetupState current;
+  final VoidCallback onAddDomain;
+  final VoidCallback onReset;
+  final ValueChanged<String> onOpenUrl;
+  final ValueChanged<String> onCopyText;
+
+  @override
+  Widget build(BuildContext context) {
+    return AppSurfaceCard(
+      accentColor: AppColors.blue,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          const AppSectionHeader(icon: Icons.tune_rounded, title: 'Manage deployment', subtitle: 'Domain, setup, dan dashboard fallback ditempatkan di layar sendiri supaya tidak memenuhi overview.'),
+          AppKeyValueGrid(items: <AppKeyValueItem>[AppKeyValueItem(label: 'Worker', value: current.scriptName), AppKeyValueItem(label: 'Primary domain', value: current.primaryDomain), AppKeyValueItem(label: 'Domains', value: current.domains.length.toString()), AppKeyValueItem(label: 'D1 inbox', value: current.d1DatabaseId.isEmpty ? 'Missing' : 'Ready')]),
+          const SizedBox(height: 12),
+          _CodeBox(value: current.workerUrl),
+          const SizedBox(height: 10),
+          AppActionTile(icon: Icons.add_link_rounded, title: 'Add domain', subtitle: 'Hubungkan domain Cloudflare lain ke Worker yang sama.', onTap: onAddDomain, color: AppColors.blue),
+          const SizedBox(height: 10),
+          AppActionTile(icon: Icons.settings_rounded, title: 'Edit setup', subtitle: 'Kembali ke mode deploy/control dan credential.', onTap: onReset, color: AppColors.pending),
+          const SizedBox(height: 10),
+          AppActionTile(icon: Icons.copy_rounded, title: 'Copy worker URL', subtitle: current.workerUrl, onTap: () => onCopyText(current.workerUrl), color: AppColors.primary),
+          const SizedBox(height: 10),
+          AppActionTile(icon: Icons.open_in_browser_rounded, title: 'Open web dashboard', subtitle: 'Fallback untuk inbox dan tampilan HTML penuh.', onTap: () => onOpenUrl(current.dashboardUrl), color: AppColors.success),
+        ],
+      ),
     );
   }
 }
