@@ -577,11 +577,11 @@ class _CredentialsStep extends StatelessWidget {
       children: <Widget>[
         const Text('Configuration', style: AppText.h1),
         const SizedBox(height: 8),
-        AppHeroCard(
+        const AppHeroCard(
           icon: Icons.tune_rounded,
           title: 'Choose setup mode',
           subtitle: 'Deploy untuk setup baru. Control Existing untuk login dan mengelola Worker lama tanpa deploy ulang.',
-          chips: const <Widget>[
+          chips: <Widget>[
             AppStatusChip(text: 'Cloudflare Free', color: AppColors.success, icon: Icons.cloud_done_rounded),
             AppStatusChip(text: 'No local server', color: AppColors.blue, icon: Icons.phone_android_rounded),
           ],
@@ -1260,29 +1260,6 @@ class _Checklist extends StatelessWidget {
             ),
           ),
       ],
-    );
-  }
-}
-
-class _InfoRow extends StatelessWidget {
-  const _InfoRow({required this.label, required this.value, this.monospace = false});
-
-  final String label;
-  final String value;
-  final bool monospace;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Text(label, style: AppText.caption.copyWith(fontWeight: FontWeight.w700)),
-          const SizedBox(height: 4),
-          SelectableText(value, style: monospace ? AppText.mono : AppText.body.copyWith(fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-        ],
-      ),
     );
   }
 }
