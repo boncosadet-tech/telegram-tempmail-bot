@@ -6,6 +6,7 @@ import 'package:flutter/services.dart' show rootBundle;
 
 import '../../core/models/setup_models.dart';
 import '../../core/theme/app_design.dart';
+import '../../core/widgets/app_components.dart';
 import '../../core/validators/input_validators.dart';
 import 'inbox_panel.dart';
 import '../../services/native_actions.dart';
@@ -575,13 +576,51 @@ class _CredentialsStep extends StatelessWidget {
       scroll: true,
       children: <Widget>[
         const Text('Configuration', style: AppText.h1),
-        const SizedBox(height: 6),
-        const Text('Pilih Deploy untuk setup/redeploy, atau Control Existing untuk login dan kontrol Worker yang sudah ada tanpa deploy ulang.', style: AppText.body),
+        const SizedBox(height: 8),
+        AppHeroCard(
+          icon: Icons.tune_rounded,
+          title: 'Choose setup mode',
+          subtitle: 'Deploy untuk setup baru. Control Existing untuk login dan mengelola Worker lama tanpa deploy ulang.',
+          chips: const <Widget>[
+            AppStatusChip(text: 'Cloudflare Free', color: AppColors.success, icon: Icons.cloud_done_rounded),
+            AppStatusChip(text: 'No local server', color: AppColors.blue, icon: Icons.phone_android_rounded),
+          ],
+        ),
         const SizedBox(height: AppSpacing.section),
-        _AppCard(
+        Row(
+          children: <Widget>[
+            Expanded(
+              child: AppActionTile(
+                icon: Icons.rocket_launch_rounded,
+                title: 'Deploy / Redeploy',
+                subtitle: 'Upload Worker, KV, D1, routing, webhook.',
+                onTap: onSubmit,
+                color: AppColors.primary,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: AppActionTile(
+                icon: Icons.login_rounded,
+                title: isConnectingExisting ? 'Connecting...' : 'Control Existing',
+                subtitle: 'Tanpa upload Worker atau rotate webhook.',
+                onTap: isConnectingExisting ? null : onControlExisting,
+                color: AppColors.blue,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.section),
+        AppSurfaceCard(
           accentColor: AppColors.primary,
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
+              const AppSectionHeader(
+                icon: Icons.vpn_key_rounded,
+                title: 'Credentials',
+                subtitle: 'Semua credential dipakai langsung dari device ke Cloudflare/Telegram.',
+              ),
               _Field(
                 controller: emailController,
                 label: 'Cloudflare email',
@@ -592,7 +631,7 @@ class _CredentialsStep extends StatelessWidget {
               _Field(
                 controller: globalKeyController,
                 label: 'Cloudflare Global API Key',
-                helper: 'Key dari Cloudflare > My Profile > API Tokens > Global API Key.',
+                helper: 'Tetap simple: Global API Key, disimpan encrypted jika toggle aktif.',
                 icon: Icons.key_rounded,
                 obscure: hideSecrets,
                 validator: InputValidators.isGlobalApiKey,
@@ -605,10 +644,23 @@ class _CredentialsStep extends StatelessWidget {
                 obscure: hideSecrets,
                 validator: (value) => value.trim().isEmpty || InputValidators.isTelegramBotToken(value),
               ),
+            ],
+          ),
+        ),
+        AppSurfaceCard(
+          accentColor: AppColors.blue,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              const AppSectionHeader(
+                icon: Icons.public_rounded,
+                title: 'Deployment target',
+                subtitle: 'Domain harus Active di Cloudflare. Script name harus sama untuk Control Existing.',
+              ),
               _Field(
                 controller: domainController,
                 label: 'Domain utama',
-                helper: 'Domain harus sudah Active/onboard di Cloudflare.',
+                helper: 'Contoh: example.com atau dahus.my.id.',
                 icon: Icons.language_rounded,
                 validator: InputValidators.isDomain,
               ),
@@ -622,10 +674,16 @@ class _CredentialsStep extends StatelessWidget {
             ],
           ),
         ),
-        _AppCard(
+        AppSurfaceCard(
           accentColor: replaceExistingMxRecords ? AppColors.warning : AppColors.pending,
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
+              const AppSectionHeader(
+                icon: Icons.shield_rounded,
+                title: 'Safety options',
+                subtitle: 'Opsi ini mengontrol penyimpanan credential dan perubahan DNS lama.',
+              ),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 value: saveCredentials,
@@ -652,21 +710,7 @@ class _CredentialsStep extends StatelessWidget {
             ],
           ),
         ),
-        Row(
-          children: <Widget>[
-            Expanded(child: OutlinedButton(onPressed: onBack, child: const Text('Back'))),
-            const SizedBox(width: 12),
-            Expanded(child: FilledButton(onPressed: onSubmit, child: const Text('Deploy / Redeploy'))),
-          ],
-        ),
-        const SizedBox(height: 10),
-        OutlinedButton.icon(
-          onPressed: isConnectingExisting ? null : onControlExisting,
-          icon: isConnectingExisting
-              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2.3))
-              : const Icon(Icons.login_rounded),
-          label: Text(isConnectingExisting ? 'Connecting...' : 'Control Existing (No Deploy)'),
-        ),
+        OutlinedButton(onPressed: onBack, child: const Text('Back')),
       ],
     );
   }
@@ -903,35 +947,47 @@ class _DashboardStep extends StatelessWidget {
     return _Screen(
       scroll: true,
       children: <Widget>[
-        const Text('Manage TempMail', style: AppText.h1),
-        const SizedBox(height: 6),
-        const Text('Kelola domain, alamat tempmail, dashboard inbox, dan Telegram bot.', style: AppText.body),
-        const SizedBox(height: AppSpacing.section),
+        const Text('Dashboard', style: AppText.h1),
+        const SizedBox(height: 8),
         if (current == null)
-          _AppCard(
+          AppSurfaceCard(
             accentColor: AppColors.warning,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                const Text('Belum ada setup state', style: AppText.h2),
-                const SizedBox(height: 6),
-                const Text('Jalankan setup utama dulu sebelum mengelola tempmail.', style: AppText.body),
-                const SizedBox(height: 12),
+                const AppSectionHeader(
+                  icon: Icons.warning_amber_rounded,
+                  title: 'Belum ada setup state',
+                  subtitle: 'Jalankan deploy baru atau control existing untuk mulai mengelola tempmail.',
+                ),
                 FilledButton(onPressed: onReset, child: const Text('Open setup')),
               ],
             ),
           )
         else ...<Widget>[
           _SummaryCard(state: current, credentials: credentials, onOpenUrl: onOpenUrl, onCopyText: onCopyText),
+          AppSurfaceCard(
+            accentColor: AppColors.primary,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                const AppSectionHeader(
+                  icon: Icons.bolt_rounded,
+                  title: 'Quick actions',
+                  subtitle: 'Aksi utama untuk bot, domain, setup, dan dashboard web.',
+                ),
+                AppActionTile(icon: Icons.smart_toy_rounded, title: 'Open Telegram bot', subtitle: current.botUsername.isEmpty ? 'Bot username belum tersedia' : '@${current.botUsername}', onTap: current.claimLink.isEmpty ? null : () => onOpenUrl(current.claimLink), color: AppColors.primary),
+                const SizedBox(height: 10),
+                AppActionTile(icon: Icons.add_link_rounded, title: 'Add domain', subtitle: 'Hubungkan domain Cloudflare lain ke Worker yang sama.', onTap: onAddDomain, color: AppColors.blue),
+                const SizedBox(height: 10),
+                AppActionTile(icon: Icons.settings_rounded, title: 'Edit setup', subtitle: 'Ubah credential, mode deploy/control, atau opsi DNS.', onTap: onReset, color: AppColors.pending),
+                const SizedBox(height: 10),
+                AppActionTile(icon: Icons.open_in_browser_rounded, title: 'Web dashboard fallback', subtitle: current.dashboardUrl, onTap: () => onOpenUrl(current.dashboardUrl), color: AppColors.success),
+              ],
+            ),
+          ),
           _AddressManagerCard(state: current, onCopyText: onCopyText),
           _InboxCard(state: current, credentials: credentials, onOpenUrl: onOpenUrl, onCopyText: onCopyText, onSaveCredentials: onSaveCredentials),
-          Row(
-            children: <Widget>[
-              Expanded(child: FilledButton.icon(onPressed: onAddDomain, icon: const Icon(Icons.add_link_rounded), label: const Text('Add domain'))),
-              const SizedBox(width: 12),
-              Expanded(child: OutlinedButton.icon(onPressed: onReset, icon: const Icon(Icons.settings_rounded), label: const Text('Edit setup'))),
-            ],
-          ),
         ],
       ],
     );
@@ -948,24 +1004,31 @@ class _SummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _AppCard(
+    return AppSurfaceCard(
       accentColor: AppColors.success,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Row(
-            children: <Widget>[
-              const Icon(Icons.check_circle_rounded, color: AppColors.success, size: 28),
-              const SizedBox(width: 10),
-              Expanded(child: Text('Setup Complete!', style: AppText.h2.copyWith(fontSize: 20))),
+          AppHeroCard(
+            icon: Icons.check_circle_rounded,
+            title: 'Setup Complete',
+            subtitle: '${state.primaryDomain} • ${state.scriptName}',
+            chips: <Widget>[
+              AppStatusChip(text: '${state.domains.length} domain', color: AppColors.blue, icon: Icons.public_rounded),
+              AppStatusChip(text: credentials == null ? 'Credential needed' : 'Secure storage active', color: credentials == null ? AppColors.warning : AppColors.success, icon: credentials == null ? Icons.lock_open_rounded : Icons.lock_rounded),
+            ],
+          ),
+          const SizedBox(height: 14),
+          AppKeyValueGrid(
+            items: <AppKeyValueItem>[
+              AppKeyValueItem(label: 'Primary domain', value: state.primaryDomain),
+              AppKeyValueItem(label: 'Telegram bot', value: state.botUsername.isEmpty ? '-' : '@${state.botUsername}'),
+              AppKeyValueItem(label: 'Domains', value: state.domains.join(', ')),
+              AppKeyValueItem(label: 'D1 inbox', value: state.d1DatabaseId.isEmpty ? 'Missing' : 'Ready'),
             ],
           ),
           const SizedBox(height: 12),
-          _InfoRow(label: 'Primary domain', value: state.primaryDomain),
-          _InfoRow(label: 'Telegram bot', value: state.botUsername.isEmpty ? '-' : '@${state.botUsername}'),
-          _InfoRow(label: 'Worker URL', value: state.workerUrl, monospace: true),
-          _InfoRow(label: 'Domains', value: state.domains.join(', ')),
-          _InfoRow(label: 'Secure storage', value: credentials == null ? 'Credential belum tersimpan' : 'Credential terenkripsi aktif'),
+          _CodeBox(value: state.workerUrl),
           const SizedBox(height: 10),
           Row(
             children: <Widget>[
