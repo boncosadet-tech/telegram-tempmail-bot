@@ -300,7 +300,7 @@ class _InboxHeader extends StatelessWidget {
             runSpacing: 8,
             children: <Widget>[
               _InboxChip(text: hasCredentials ? 'Native D1 active' : 'Locked', color: hasCredentials ? AppColors.success : AppColors.warning),
-              _InboxChip(text: 'Web fallback ready', color: AppColors.blue),
+              const _InboxChip(text: 'Web fallback ready', color: AppColors.blue),
             ],
           ),
         ],
