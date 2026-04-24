@@ -4,7 +4,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { addDomainToApp, performSetup, performVerify, resetOwner, rotateWebhookSecret } from "../src/lib/service.js";
+import {
+  addDomainToApp,
+  performSetup,
+  performVerify,
+  resetOwner,
+  rotateWebhookSecret
+} from "../src/lib/service.js";
 
 function createTempRepo() {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "tempmail-bot-"));
@@ -39,8 +45,17 @@ function createCloudflareMock() {
     async getAccountWorkersSubdomain() {
       return "demoacct";
     },
-    async uploadWorkerScript(_accountId, scriptName) {
-      state.workerUploads.push(scriptName);
+    async uploadWorkerScript(_accountId, scriptName, modules, options) {
+      state.workerUploads.push({
+        scriptName,
+        modulePaths: Array.isArray(modules) ? modules.map((m) => m.path) : [],
+        mainModule: options?.mainModule ?? "main.js",
+        bindings: {
+          domain: options?.domain,
+          kvNamespaceId: options?.kvNamespaceId,
+          d1DatabaseId: options?.d1DatabaseId
+        }
+      });
     },
     async setWorkerSecret(_accountId, _scriptName, name, text) {
       if (name === "WEBHOOK_SECRET") state.webhookSecretWrites.push(text);
@@ -200,7 +215,9 @@ test("performVerify accepts an added domain listed in app KV", async () => {
   });
 
   assert.equal(result.ok, true);
-  assert.ok(statuses.some((item) => item.name === "binding DOMAIN" && item.detail.includes("in domains KV")));
+  assert.ok(
+    statuses.some((item) => item.name === "binding DOMAIN" && item.detail.includes("in domains KV"))
+  );
 });
 
 test("resetOwner deletes owner key from KV", async () => {

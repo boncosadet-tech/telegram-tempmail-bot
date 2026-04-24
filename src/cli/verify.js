@@ -50,15 +50,13 @@ async function collectVerifyInputs(args, cwd) {
 
 export async function runVerify(rawArgs = parseArgs(process.argv.slice(2))) {
   const cwd = process.cwd();
-  const {
-    domain,
-    cfEmail,
-    cfGlobalKey,
-    telegramBotToken,
-    scriptNameInput
-  } = await collectVerifyInputs(rawArgs, cwd);
+  const { domain, cfEmail, cfGlobalKey, telegramBotToken, scriptNameInput } =
+    await collectVerifyInputs(rawArgs, cwd);
 
-  const scriptName = resolveScriptName(domain, scriptNameInput ? sanitizeWorkerName(scriptNameInput) : "");
+  const scriptName = resolveScriptName(
+    domain,
+    scriptNameInput ? sanitizeWorkerName(scriptNameInput) : ""
+  );
   const cf = new CloudflareClient({ email: cfEmail, globalApiKey: cfGlobalKey });
   const tg = telegramBotToken ? new TelegramClient(telegramBotToken) : null;
   const result = await performVerify({

@@ -619,8 +619,52 @@ git push origin vX.Y.Z
 
 Setelah tag dipush, GitHub Actions akan publish ke npm memakai secret `NPM_TOKEN`.
 
+## Arsitektur Worker
+
+`src/main.js` adalah entry point yang tipis dan meng-_import_ modul di bawah
+`src/worker/`:
+
+| File                         | Tanggung jawab                                                             |
+| ---------------------------- | -------------------------------------------------------------------------- |
+| `src/worker/utils.js`        | Primitives: `json`, `redirect`, random token/digit, `safeEqual`.           |
+| `src/worker/html.js`         | Escape/decoding HTML, sanitasi URL, renderer email aman.                    |
+| `src/worker/email.js`        | Parsing MIME, `readRaw`, `extractLikelyCode`, preview body.                 |
+| `src/worker/domains.js`      | Validasi alias, normalisasi domain, owner record di KV.                     |
+| `src/worker/db.js`           | Schema D1, insert/list/purge messages dan aliases.                          |
+| `src/worker/auth.js`         | Cookie session, login token, `requireOwnerSession`.                         |
+| `src/worker/api.js`          | REST API `/api/*` untuk dashboard.                                          |
+| `src/worker/telegram.js`     | Telegram Bot API transport + handler command/callback.                      |
+| `src/worker/dashboard.js`    | Template HTML login + dashboard premium.                                    |
+
+Cloudflare mengizinkan Worker multi-modul dalam satu deploy; `performSetup`
+menggunakan `collectWorkerModules()` untuk mengumpulkan semua file di atas dan
+mengunggahnya lewat `CloudflareClient.uploadWorkerScript(accountId, name, modules, options)`.
+
+### Environment bindings
+
+| Name             | Jenis          | Dibuat oleh       | Catatan                                              |
+| ---------------- | -------------- | ----------------- | ---------------------------------------------------- |
+| `DOMAIN`         | Plain text     | `performSetup`    | Domain utama untuk alias email.                      |
+| `STATE_KV`       | KV namespace   | `performSetup`    | Owner record, sessions, domain tambahan.             |
+| `MAIL_DB`        | D1 database    | `performSetup`    | Inbox + aliases. Retention 24 jam / 30 menit untuk OTP. |
+| `BOT_TOKEN`      | Worker secret  | `performSetup`    | Token bot Telegram (jangan commit).                  |
+| `WEBHOOK_SECRET` | Worker secret  | `performSetup`    | Header rahasia webhook Telegram; cek timing-safe.    |
+
+### Quality gates
+
+```bash
+npm run check   # syntax-check + lint + format:check + tests
+```
+
+Lihat [`CONTRIBUTING.md`](./CONTRIBUTING.md) untuk rincian script,
+[`SECURITY.md`](./SECURITY.md) untuk threat model, dan
+[`CHANGELOG.md`](./CHANGELOG.md) untuk riwayat rilis.
+
 ## Dokumen tambahan
 
 - [AI.md](./AI.md)
+- [CHANGELOG.md](./CHANGELOG.md)
+- [CONTRIBUTING.md](./CONTRIBUTING.md)
+- [SECURITY.md](./SECURITY.md)
 - [Project Context](./docs/project-context.md)
 - [Development Roadmap](./docs/development-roadmap.md)

@@ -18,3 +18,7 @@ apps/mobile/android/app/*.keystore
 # OMX runtime/autopilot scratch artifacts
 .omx/context/
 .omx/plans/autopilot-*.md
+
+# Flutter-only artifacts from local builds
+apps/mobile/android/app/src/main/java/
+apps/mobile/pubspec.lock

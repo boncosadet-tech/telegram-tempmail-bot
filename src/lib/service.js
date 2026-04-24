@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 
 import {
@@ -5,10 +6,37 @@ import {
   normalizeDomainName,
   randomToken,
   readJsonFile,
-  readTextFile,
   sanitizeWorkerName,
   writeJsonFile
 } from "./common.js";
+
+/**
+ * Collect the worker entry point plus every sibling module it imports into a
+ * flat list suitable for the Cloudflare multi-module upload API.
+ * Paths are returned relative to `srcDir` so they match the ES module imports
+ * used at runtime (e.g. `main.js` and `worker/html.js`).
+ *
+ * @param {string} srcDir Absolute path to the `src/` directory.
+ * @returns {Array<{ path: string, content: string }>}
+ */
+export function collectWorkerModules(srcDir) {
+  const modules = [];
+  const mainPath = path.join(srcDir, "main.js");
+  modules.push({ path: "main.js", content: fs.readFileSync(mainPath, "utf8") });
+  const workerDir = path.join(srcDir, "worker");
+  if (fs.existsSync(workerDir)) {
+    const entries = fs.readdirSync(workerDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith(".js")) continue;
+      const abs = path.join(workerDir, entry.name);
+      modules.push({
+        path: `worker/${entry.name}`,
+        content: fs.readFileSync(abs, "utf8")
+      });
+    }
+  }
+  return modules;
+}
 
 export const OWNER_KEY = "owner";
 export const DOMAINS_KEY = "domains";
@@ -43,9 +71,7 @@ const D1_SCHEMA_STATEMENTS = [
 ];
 
 export function resolveScriptName(domain, scriptNameInput = "") {
-  return scriptNameInput
-    ? sanitizeWorkerName(scriptNameInput)
-    : defaultWorkerNameForDomain(domain);
+  return scriptNameInput ? sanitizeWorkerName(scriptNameInput) : defaultWorkerNameForDomain(domain);
 }
 
 export function normalizeCatchAllTarget(catchAll) {
@@ -97,9 +123,17 @@ async function applyD1Migrations(cf, accountId, databaseId) {
     await cf.queryD1(accountId, databaseId, statement);
   }
   try {
-    await cf.queryD1(accountId, databaseId, "ALTER TABLE messages ADD COLUMN rendered_html TEXT NOT NULL DEFAULT ''");
+    await cf.queryD1(
+      accountId,
+      databaseId,
+      "ALTER TABLE messages ADD COLUMN rendered_html TEXT NOT NULL DEFAULT ''"
+    );
   } catch (error) {
-    if (!String(error?.message || error).toLowerCase().includes("duplicate column")) {
+    if (
+      !String(error?.message || error)
+        .toLowerCase()
+        .includes("duplicate column")
+    ) {
       throw error;
     }
   }
@@ -137,7 +171,10 @@ export async function performSetup({
   onProgress("ensuring KV namespace");
   const kvNamespace = await cf.findOrCreateKVNamespace(accountId, kvTitle);
   onProgress("ensuring D1 database");
-  const d1Database = await cf.findOrCreateD1Database(accountId, sanitizeWorkerName(`${D1_DB_PREFIX}-${domain}`));
+  const d1Database = await cf.findOrCreateD1Database(
+    accountId,
+    sanitizeWorkerName(`${D1_DB_PREFIX}-${domain}`)
+  );
 
   const accountSubdomain = await cf.getAccountWorkersSubdomain(accountId);
   const workerUrlBase = `https://${scriptName}.${accountSubdomain}.workers.dev`;
@@ -160,18 +197,15 @@ export async function performSetup({
     };
   }
 
-  const workerSource = readTextFile(path.resolve(cwd, "src/main.js"));
+  const workerModules = collectWorkerModules(path.resolve(cwd, "src"));
 
   onProgress(`uploading worker script ${scriptName}`);
-  await cf.uploadWorkerScript(
-    accountId,
-    scriptName,
-    workerSource,
+  await cf.uploadWorkerScript(accountId, scriptName, workerModules, {
     domain,
-    kvNamespace.id,
-    "2026-04-18",
-    d1Database.uuid || d1Database.id
-  );
+    kvNamespaceId: kvNamespace.id,
+    compatibilityDate: "2026-04-18",
+    d1DatabaseId: d1Database.uuid || d1Database.id
+  });
 
   onProgress("applying D1 schema");
   await applyD1Migrations(cf, accountId, d1Database.uuid || d1Database.id);
@@ -239,13 +273,7 @@ export async function performSetup({
   };
 }
 
-export async function performVerify({
-  cf,
-  tg = null,
-  domain,
-  scriptName,
-  onStatus = () => {}
-}) {
+export async function performVerify({ cf, tg = null, domain, scriptName, onStatus = () => {} }) {
   domain = normalizeDomainName(domain);
   const failures = [];
 
@@ -272,7 +300,9 @@ export async function performVerify({
     kvBinding = bindings.find((b) => b.type === "kv_namespace" && b.name === "STATE_KV");
     const d1Binding = bindings.find((b) => b.type === "d1" && b.name === D1_BINDING_NAME);
     if (kvBinding?.namespace_id) {
-      configuredDomains = parseDomainsValue(await cf.getKVValue(accountId, kvBinding.namespace_id, DOMAINS_KEY));
+      configuredDomains = parseDomainsValue(
+        await cf.getKVValue(accountId, kvBinding.namespace_id, DOMAINS_KEY)
+      );
     }
     if (!domainBinding) {
       failures.push("DOMAIN binding is missing or mismatched");
@@ -282,7 +312,9 @@ export async function performVerify({
       onStatus(
         "binding DOMAIN",
         "ok",
-        domainBinding.text === domain ? domainBinding.text : `${domainBinding.text} primary; ${domain} in domains KV`
+        domainBinding.text === domain
+          ? domainBinding.text
+          : `${domainBinding.text} primary; ${domain} in domains KV`
       );
     }
     if (!kvBinding || !kvBinding.namespace_id) {
@@ -416,7 +448,9 @@ export async function addDomainToApp({
   }
   await cf.setCatchAllWorker(zone.id, effectiveScriptName);
 
-  const currentDomains = parseDomainsValue(await cf.getKVValue(accountId, kvBinding.namespace_id, DOMAINS_KEY));
+  const currentDomains = parseDomainsValue(
+    await cf.getKVValue(accountId, kvBinding.namespace_id, DOMAINS_KEY)
+  );
   const domains = uniqueDomains([
     domainBinding?.text,
     saved.domain,
@@ -454,13 +488,7 @@ export async function addDomainToApp({
   };
 }
 
-export async function resetOwner({
-  cf,
-  domain,
-  scriptName,
-  cwd,
-  onProgress = () => {}
-}) {
+export async function resetOwner({ cf, domain, scriptName, cwd, onProgress = () => {} }) {
   const saved = readSavedState(cwd);
   const zone = await cf.getZoneByDomain(domain);
   const accountId = zone.account?.id;
@@ -469,7 +497,9 @@ export async function resetOwner({
   }
   const effectiveScriptName = scriptName || saved.scriptName || defaultWorkerNameForDomain(domain);
   const workerSettings = await cf.getWorkerSettings(accountId, effectiveScriptName);
-  const kvBinding = (workerSettings.bindings || []).find((b) => b.type === "kv_namespace" && b.name === "STATE_KV");
+  const kvBinding = (workerSettings.bindings || []).find(
+    (b) => b.type === "kv_namespace" && b.name === "STATE_KV"
+  );
   if (!kvBinding?.namespace_id) {
     throw new Error("STATE_KV binding is missing");
   }

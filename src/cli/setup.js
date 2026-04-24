@@ -63,17 +63,13 @@ async function collectSetupInputs(args, cwd) {
 
 export async function runSetup(rawArgs = parseArgs(process.argv.slice(2))) {
   const cwd = process.cwd();
-  const {
-    domain,
-    cfEmail,
-    cfGlobalKey,
-    telegramBotToken,
-    scriptNameInput,
-    force,
-    dryRun
-  } = await collectSetupInputs(rawArgs, cwd);
+  const { domain, cfEmail, cfGlobalKey, telegramBotToken, scriptNameInput, force, dryRun } =
+    await collectSetupInputs(rawArgs, cwd);
 
-  const scriptName = resolveScriptName(domain, scriptNameInput ? sanitizeWorkerName(scriptNameInput) : "");
+  const scriptName = resolveScriptName(
+    domain,
+    scriptNameInput ? sanitizeWorkerName(scriptNameInput) : ""
+  );
 
   const tg = new TelegramClient(telegramBotToken);
   const cf = new CloudflareClient({ email: cfEmail, globalApiKey: cfGlobalKey });

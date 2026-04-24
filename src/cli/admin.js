@@ -31,7 +31,11 @@ async function collectAdminInputs(args, cwd) {
   if (!action || !domain || !cfEmail || !cfGlobalKey) {
     await withPrompts(async (rl) => {
       console.log("Interactive admin");
-      action = await promptInput(rl, "Action (reset-owner|rotate-secret|add-domain)", action || "reset-owner");
+      action = await promptInput(
+        rl,
+        "Action (reset-owner|rotate-secret|add-domain)",
+        action || "reset-owner"
+      );
       if (action === "add-domain" && domain === saved.domain) domain = "";
       domain = await promptInput(rl, action === "add-domain" ? "Domain to add" : "Domain", domain);
       cfEmail = await promptInput(rl, "Cloudflare email", cfEmail);
@@ -41,7 +45,11 @@ async function collectAdminInputs(args, cwd) {
       }
       scriptNameInput = await promptInput(rl, "Worker script name", scriptNameInput);
       if (action === "add-domain" && !force) {
-        force = (await promptInput(rl, "Replace existing foreign catch-all if found? (yes/no)", "no")).toLowerCase().startsWith("y");
+        force = (
+          await promptInput(rl, "Replace existing foreign catch-all if found? (yes/no)", "no")
+        )
+          .toLowerCase()
+          .startsWith("y");
       }
     });
   }
@@ -68,19 +76,14 @@ async function collectAdminInputs(args, cwd) {
 
 export async function runAdmin(rawArgs = parseArgs(process.argv.slice(2))) {
   const cwd = process.cwd();
-  const {
-    action,
-    domain,
-    cfEmail,
-    cfGlobalKey,
-    telegramBotToken,
-    scriptNameInput,
-    force
-  } = await collectAdminInputs(rawArgs, cwd);
+  const { action, domain, cfEmail, cfGlobalKey, telegramBotToken, scriptNameInput, force } =
+    await collectAdminInputs(rawArgs, cwd);
   const cf = new CloudflareClient({ email: cfEmail, globalApiKey: cfGlobalKey });
   const scriptName = scriptNameInput
     ? sanitizeWorkerName(scriptNameInput)
-    : (action === "add-domain" ? "" : defaultWorkerNameForDomain(domain));
+    : action === "add-domain"
+      ? ""
+      : defaultWorkerNameForDomain(domain);
 
   if (action === "add-domain") {
     const result = await addDomainToApp({

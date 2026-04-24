@@ -42,7 +42,12 @@
     "access": "public"
   },
   "scripts": {
-    "check": "node --check src/main.js && node --check src/cli/setup.js && node --check src/cli/verify.js && node --check src/cli/admin.js && node --check src/cli/app.js && node --check bin/telegram-tempmail-bot && node --check bin/telegram-tempmail-admin && node --check bin/telegram-tempmail-setup && node --check bin/telegram-tempmail-verify",
+    "syntax-check": "node --check src/main.js && node --check src/cli/setup.js && node --check src/cli/verify.js && node --check src/cli/admin.js && node --check src/cli/app.js && node --check bin/telegram-tempmail-bot && node --check bin/telegram-tempmail-admin && node --check bin/telegram-tempmail-setup && node --check bin/telegram-tempmail-verify",
+    "lint": "eslint \"src/**/*.js\" \"test/**/*.js\"",
+    "lint:fix": "npm run lint -- --fix",
+    "format": "prettier --write \"src/**/*.js\" \"test/**/*.js\" \"*.{md,json}\"",
+    "format:check": "prettier --check \"src/**/*.js\" \"test/**/*.js\" \"*.{md,json}\"",
+    "check": "npm run syntax-check && npm run lint && npm run format:check && npm test",
     "start": "node src/cli/app.js",
     "setup": "node src/cli/setup.js",
     "verify": "node src/cli/verify.js",
@@ -52,6 +57,10 @@
     "tail": "wrangler tail"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "eslint": "^9.14.0",
+    "globals": "^15.11.0",
+    "prettier": "^3.3.3",
     "wrangler": "^4.13.2"
   }
 }

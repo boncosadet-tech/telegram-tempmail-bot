@@ -46,13 +46,29 @@ class MockD1Statement {
     }
     if (sql.startsWith("INSERT INTO aliases")) {
       const [aliasLocal, source, createdAt, lastSeenAt] = this.params;
-      this.db.aliases.set(aliasLocal, { alias_local: aliasLocal, source, created_at: createdAt, last_seen_at: lastSeenAt });
+      this.db.aliases.set(aliasLocal, {
+        alias_local: aliasLocal,
+        source,
+        created_at: createdAt,
+        last_seen_at: lastSeenAt
+      });
       return { meta: { changes: 1 } };
     }
     if (sql.startsWith("INSERT INTO messages")) {
       const [
-        id, aliasLocal, aliasFull, sender, subject, previewText, renderedHtml,
-        otpCode, isOtp, sizeKb, rawKind, receivedAt, expiresAt
+        id,
+        aliasLocal,
+        aliasFull,
+        sender,
+        subject,
+        previewText,
+        renderedHtml,
+        otpCode,
+        isOtp,
+        sizeKb,
+        rawKind,
+        receivedAt,
+        expiresAt
       ] = this.params;
       this.db.messages.push({
         id,
@@ -145,14 +161,22 @@ function createRawEmail(text) {
 }
 
 test("health endpoint reports owner claim state", async () => {
-  const unclaimedResponse = await worker.fetch(new Request("https://worker.example/health"), createEnv());
+  const unclaimedResponse = await worker.fetch(
+    new Request("https://worker.example/health"),
+    createEnv()
+  );
   const unclaimedData = await unclaimedResponse.json();
   assert.equal(unclaimedResponse.status, 200);
   assert.equal(unclaimedData.ownerClaimed, false);
 
   const claimedResponse = await worker.fetch(
     new Request("https://worker.example/health"),
-    createEnv({ userId: "99", chatId: "77", claimedAt: "2026-04-19T00:00:00.000Z", domain: "example.com" })
+    createEnv({
+      userId: "99",
+      chatId: "77",
+      claimedAt: "2026-04-19T00:00:00.000Z",
+      domain: "example.com"
+    })
   );
   const claimedData = await claimedResponse.json();
   assert.equal(claimedData.ownerClaimed, true);
@@ -164,7 +188,10 @@ test("telegram start claim stores owner in KV and acknowledges claim", async () 
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (_url, init) => {
     sentMessages.push(JSON.parse(init.body));
-    return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } });
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
   };
 
   try {
@@ -175,7 +202,9 @@ test("telegram start claim stores owner in KV and acknowledges claim", async () 
           "content-type": "application/json",
           "X-Telegram-Bot-Api-Secret-Token": "secret-token"
         },
-        body: JSON.stringify(createTelegramUpdate("/start claim", { userId: 6083649512, chatId: 6083649512 }))
+        body: JSON.stringify(
+          createTelegramUpdate("/start claim", { userId: 6083649512, chatId: 6083649512 })
+        )
       }),
       env
     );
@@ -202,7 +231,10 @@ test("web command issues owner-only dashboard login link", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (_url, init) => {
     sentMessages.push(JSON.parse(init.body));
-    return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } });
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
   };
 
   try {
@@ -213,7 +245,9 @@ test("web command issues owner-only dashboard login link", async () => {
           "content-type": "application/json",
           "X-Telegram-Bot-Api-Secret-Token": "secret-token"
         },
-        body: JSON.stringify(createTelegramUpdate("/web", { userId: 6083649512, chatId: 6083649512 }))
+        body: JSON.stringify(
+          createTelegramUpdate("/web", { userId: 6083649512, chatId: 6083649512 })
+        )
       }),
       env
     );
@@ -221,9 +255,14 @@ test("web command issues owner-only dashboard login link", async () => {
     assert.equal(response.status, 200);
     assert.equal(sentMessages.length, 1);
     assert.match(sentMessages[0].text, /Dashboard private/);
-    assert.match(sentMessages[0].text, /https:\/\/telegram-tempmail\.example\.workers\.dev\/auth\/telegram\?token=/);
+    assert.match(
+      sentMessages[0].text,
+      /https:\/\/telegram-tempmail\.example\.workers\.dev\/auth\/telegram\?token=/
+    );
     assert.equal(sentMessages[0].reply_markup.inline_keyboard[0][0].text, "📬 Buka dashboard");
-    const loginKeys = Array.from(env.STATE_KV.store.keys()).filter((key) => key.startsWith("login:"));
+    const loginKeys = Array.from(env.STATE_KV.store.keys()).filter((key) =>
+      key.startsWith("login:")
+    );
     assert.equal(loginKeys.length, 1);
   } finally {
     globalThis.fetch = originalFetch;
@@ -241,7 +280,10 @@ test("new command supports custom alias names", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (_url, init) => {
     sentMessages.push(JSON.parse(init.body));
-    return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } });
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
   };
 
   try {
@@ -252,7 +294,12 @@ test("new command supports custom alias names", async () => {
           "content-type": "application/json",
           "X-Telegram-Bot-Api-Secret-Token": "secret-token"
         },
-        body: JSON.stringify(createTelegramUpdate("/new hello.team@example.com", { userId: 6083649512, chatId: 6083649512 }))
+        body: JSON.stringify(
+          createTelegramUpdate("/new hello.team@example.com", {
+            userId: 6083649512,
+            chatId: 6083649512
+          })
+        )
       }),
       env
     );
@@ -261,7 +308,11 @@ test("new command supports custom alias names", async () => {
     assert.equal(sentMessages.length, 1);
     assert.match(sentMessages[0].text, /Custom temp email dibuat/);
     assert.match(sentMessages[0].text, /hello\.team@example\.com/);
-    assert.ok(sentMessages[0].reply_markup.inline_keyboard.flat().some((button) => button.callback_data === "new"));
+    assert.ok(
+      sentMessages[0].reply_markup.inline_keyboard
+        .flat()
+        .some((button) => button.callback_data === "new")
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -278,7 +329,10 @@ test("new command generates readable default alias", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (_url, init) => {
     sentMessages.push(JSON.parse(init.body));
-    return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } });
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
   };
 
   try {
@@ -289,7 +343,9 @@ test("new command generates readable default alias", async () => {
           "content-type": "application/json",
           "X-Telegram-Bot-Api-Secret-Token": "secret-token"
         },
-        body: JSON.stringify(createTelegramUpdate("/new", { userId: 6083649512, chatId: 6083649512 }))
+        body: JSON.stringify(
+          createTelegramUpdate("/new", { userId: 6083649512, chatId: 6083649512 })
+        )
       }),
       env
     );
@@ -297,7 +353,11 @@ test("new command generates readable default alias", async () => {
     assert.equal(response.status, 200);
     assert.equal(sentMessages.length, 1);
     assert.match(sentMessages[0].text, /[a-z]+-[a-z]+-[0-9]{4}@example\.com/);
-    assert.ok(sentMessages[0].reply_markup.inline_keyboard.flat().some((button) => button.callback_data === "web"));
+    assert.ok(
+      sentMessages[0].reply_markup.inline_keyboard
+        .flat()
+        .some((button) => button.callback_data === "web")
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -314,7 +374,10 @@ test("menu command shows Telegram inline control center", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (_url, init) => {
     sentMessages.push(JSON.parse(init.body));
-    return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } });
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
   };
 
   try {
@@ -325,7 +388,9 @@ test("menu command shows Telegram inline control center", async () => {
           "content-type": "application/json",
           "X-Telegram-Bot-Api-Secret-Token": "secret-token"
         },
-        body: JSON.stringify(createTelegramUpdate("/menu", { userId: 6083649512, chatId: 6083649512 }))
+        body: JSON.stringify(
+          createTelegramUpdate("/menu", { userId: 6083649512, chatId: 6083649512 })
+        )
       }),
       env
     );
@@ -358,7 +423,10 @@ test("callback new shows domain picker when multiple domains are configured", as
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
     calls.push({ url: String(url), body: JSON.parse(init.body) });
-    return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } });
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
   };
 
   try {
@@ -369,7 +437,9 @@ test("callback new shows domain picker when multiple domains are configured", as
           "content-type": "application/json",
           "X-Telegram-Bot-Api-Secret-Token": "secret-token"
         },
-        body: JSON.stringify(createTelegramCallback("new", { userId: 6083649512, chatId: 6083649512 }))
+        body: JSON.stringify(
+          createTelegramCallback("new", { userId: 6083649512, chatId: 6083649512 })
+        )
       }),
       env
     );
@@ -379,7 +449,11 @@ test("callback new shows domain picker when multiple domains are configured", as
     const message = calls.find((call) => call.body.chat_id);
     assert.match(message.body.text, /Pilih domain/);
     const buttons = message.body.reply_markup.inline_keyboard.flat();
-    assert.ok(buttons.some((button) => button.callback_data === "new:1" && button.text === "@second.example"));
+    assert.ok(
+      buttons.some(
+        (button) => button.callback_data === "new:1" && button.text === "@second.example"
+      )
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -402,7 +476,10 @@ test("callback new domain creates readable alias on selected domain", async () =
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
     calls.push({ url: String(url), body: JSON.parse(init.body) });
-    return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } });
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
   };
 
   try {
@@ -413,7 +490,9 @@ test("callback new domain creates readable alias on selected domain", async () =
           "content-type": "application/json",
           "X-Telegram-Bot-Api-Secret-Token": "secret-token"
         },
-        body: JSON.stringify(createTelegramCallback("new:1", { userId: 6083649512, chatId: 6083649512 }))
+        body: JSON.stringify(
+          createTelegramCallback("new:1", { userId: 6083649512, chatId: 6083649512 })
+        )
       }),
       env
     );
@@ -421,7 +500,11 @@ test("callback new domain creates readable alias on selected domain", async () =
     assert.equal(response.status, 200);
     const message = calls.find((call) => call.body.chat_id);
     assert.match(message.body.text, /[a-z]+-[a-z]+-[0-9]{4}@second\.example/);
-    assert.ok(message.body.reply_markup.inline_keyboard.flat().some((button) => button.callback_data === "menu"));
+    assert.ok(
+      message.body.reply_markup.inline_keyboard
+        .flat()
+        .some((button) => button.callback_data === "menu")
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -444,7 +527,10 @@ test("new command can create an alias on an added configured domain", async () =
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (_url, init) => {
     sentMessages.push(JSON.parse(init.body));
-    return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } });
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
   };
 
   try {
@@ -455,7 +541,12 @@ test("new command can create an alias on an added configured domain", async () =
           "content-type": "application/json",
           "X-Telegram-Bot-Api-Secret-Token": "secret-token"
         },
-        body: JSON.stringify(createTelegramUpdate("/new billing@second.example", { userId: 6083649512, chatId: 6083649512 }))
+        body: JSON.stringify(
+          createTelegramUpdate("/new billing@second.example", {
+            userId: 6083649512,
+            chatId: 6083649512
+          })
+        )
       }),
       env
     );
@@ -485,7 +576,10 @@ test("new command rejects domains not configured on the app", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (_url, init) => {
     sentMessages.push(JSON.parse(init.body));
-    return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } });
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
   };
 
   try {
@@ -496,7 +590,12 @@ test("new command rejects domains not configured on the app", async () => {
           "content-type": "application/json",
           "X-Telegram-Bot-Api-Secret-Token": "secret-token"
         },
-        body: JSON.stringify(createTelegramUpdate("/new billing@not-added.example", { userId: 6083649512, chatId: 6083649512 }))
+        body: JSON.stringify(
+          createTelegramUpdate("/new billing@not-added.example", {
+            userId: 6083649512,
+            chatId: 6083649512
+          })
+        )
       }),
       env
     );
@@ -521,7 +620,10 @@ test("email handler forwards summary to claimed owner chat", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (_url, init) => {
     sentMessages.push(JSON.parse(init.body));
-    return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } });
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
   };
 
   try {
@@ -530,10 +632,16 @@ test("email handler forwards summary to claimed owner chat", async () => {
         from: "noreply@example.net",
         to: "tmp-abc123@example.com",
         headers: new Headers({ subject: "Your OTP code" }),
-        raw: createRawEmail("Subject: Your OTP code\nContent-Type: text/plain\n\nYour verification code is 123456.")
+        raw: createRawEmail(
+          "Subject: Your OTP code\nContent-Type: text/plain\n\nYour verification code is 123456."
+        )
       },
       env,
-      { waitUntil(promise) { return promise; } }
+      {
+        waitUntil(promise) {
+          return promise;
+        }
+      }
     );
 
     assert.equal(sentMessages.length, 1);
@@ -556,7 +664,10 @@ test("email handler still sends when waitUntil is unavailable", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (_url, init) => {
     sentMessages.push(JSON.parse(init.body));
-    return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } });
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
   };
 
   try {
@@ -565,7 +676,9 @@ test("email handler still sends when waitUntil is unavailable", async () => {
         from: "noreply@example.net",
         to: "tmp-noctx@example.com",
         headers: new Headers({ subject: "Login code" }),
-        raw: createRawEmail("Subject: Login code\nContent-Type: text/plain\n\nUse 654321 to continue.")
+        raw: createRawEmail(
+          "Subject: Login code\nContent-Type: text/plain\n\nUse 654321 to continue."
+        )
       },
       env,
       {}
@@ -581,15 +694,22 @@ test("email handler still sends when waitUntil is unavailable", async () => {
 
 test("email handler stores html-like rendered content for dashboard view", async () => {
   const mailDb = new MockD1();
-  const env = createEnv({
-    userId: "6083649512",
-    chatId: "6083649512",
-    claimedAt: "2026-04-19T00:00:00.000Z",
-    domain: "example.com"
-  }, { MAIL_DB: mailDb });
+  const env = createEnv(
+    {
+      userId: "6083649512",
+      chatId: "6083649512",
+      claimedAt: "2026-04-19T00:00:00.000Z",
+      domain: "example.com"
+    },
+    { MAIL_DB: mailDb }
+  );
 
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } });
+  globalThis.fetch = async () =>
+    new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
 
   try {
     await worker.email(
@@ -598,11 +718,15 @@ test("email handler stores html-like rendered content for dashboard view", async
         to: "html-view@example.com",
         headers: new Headers({ subject: "Welcome" }),
         raw: createRawEmail(
-          "Subject: Welcome\nContent-Type: multipart/alternative; boundary=abc\n\n--abc\nContent-Type: text/plain\n\nHello there\n\n--abc\nContent-Type: text/html\n\n<p>Hello <strong>there</strong></p><p>Visit <a href=\"https://example.com/verify\">Verify</a></p>\n--abc--"
+          'Subject: Welcome\nContent-Type: multipart/alternative; boundary=abc\n\n--abc\nContent-Type: text/plain\n\nHello there\n\n--abc\nContent-Type: text/html\n\n<p>Hello <strong>there</strong></p><p>Visit <a href="https://example.com/verify">Verify</a></p>\n--abc--'
         )
       },
       env,
-      { waitUntil(promise) { return promise; } }
+      {
+        waitUntil(promise) {
+          return promise;
+        }
+      }
     );
 
     assert.equal(mailDb.messages.length, 1);

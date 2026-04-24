@@ -37,7 +37,9 @@ export class CloudflareClient {
   }
 
   async getZoneByDomain(domain) {
-    const res = await this.requestJson(`/zones?name=${encodeURIComponent(domain)}&status=active&per_page=1`);
+    const res = await this.requestJson(
+      `/zones?name=${encodeURIComponent(domain)}&status=active&per_page=1`
+    );
     if (!res.result || res.result.length === 0) {
       throw new Error(`Active zone not found for domain: ${domain}`);
     }
@@ -53,7 +55,9 @@ export class CloudflareClient {
   }
 
   async listKVNamespaces(accountId) {
-    const res = await this.requestJson(`/accounts/${accountId}/storage/kv/namespaces?per_page=100&page=1`);
+    const res = await this.requestJson(
+      `/accounts/${accountId}/storage/kv/namespaces?per_page=100&page=1`
+    );
     return res.result || [];
   }
 
@@ -92,7 +96,30 @@ export class CloudflareClient {
     return res.result || [];
   }
 
-  async uploadWorkerScript(accountId, scriptName, sourceCode, domain, kvNamespaceId, compatibilityDate, d1DatabaseId = "") {
+  /**
+   * Upload a (possibly multi-module) Worker script. `modules` is an array of
+   * `{ path, content }` where `path` is the name used in ES-module imports —
+   * the main module must be included and its path matches `mainModule`.
+   *
+   * @param {string} accountId
+   * @param {string} scriptName
+   * @param {Array<{ path: string, content: string | ArrayBuffer | Uint8Array }>} modules
+   * @param {object} options
+   * @param {string} options.domain - Primary DOMAIN binding value.
+   * @param {string} options.kvNamespaceId - STATE_KV binding namespace id.
+   * @param {string} options.compatibilityDate - e.g. "2026-04-18".
+   * @param {string} [options.d1DatabaseId] - Optional MAIL_DB D1 database id.
+   * @param {string} [options.mainModule="main.js"] - Entry-point module path.
+   */
+  async uploadWorkerScript(accountId, scriptName, modules, options = {}) {
+    const {
+      domain,
+      kvNamespaceId,
+      compatibilityDate,
+      d1DatabaseId = "",
+      mainModule = "main.js"
+    } = options;
+
     const bindings = [
       { type: "plain_text", name: "DOMAIN", text: domain },
       { type: "kv_namespace", name: "STATE_KV", namespace_id: kvNamespaceId }
@@ -101,13 +128,26 @@ export class CloudflareClient {
       bindings.push({ type: "d1", name: "MAIL_DB", database_id: d1DatabaseId });
     }
     const metadata = {
-      main_module: "main.js",
+      main_module: mainModule,
       compatibility_date: compatibilityDate,
       bindings
     };
+
     const form = new FormData();
     form.append("metadata", JSON.stringify(metadata));
-    form.append("main.js", new Blob([sourceCode], { type: "application/javascript+module" }), "main.js");
+    if (!Array.isArray(modules) || modules.length === 0) {
+      throw new Error("uploadWorkerScript requires at least one module");
+    }
+    if (!modules.some((m) => m.path === mainModule)) {
+      throw new Error(`uploadWorkerScript modules must include the main module "${mainModule}"`);
+    }
+    for (const mod of modules) {
+      form.append(
+        mod.path,
+        new Blob([mod.content], { type: "application/javascript+module" }),
+        mod.path
+      );
+    }
     return this.request(`/accounts/${accountId}/workers/scripts/${scriptName}`, {
       method: "PUT",
       body: form
@@ -129,7 +169,9 @@ export class CloudflareClient {
   }
 
   async getWorkerSettings(accountId, scriptName) {
-    const res = await this.requestJson(`/accounts/${accountId}/workers/scripts/${scriptName}/settings`);
+    const res = await this.requestJson(
+      `/accounts/${accountId}/workers/scripts/${scriptName}/settings`
+    );
     return res.result;
   }
 
