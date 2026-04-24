@@ -1,0 +1,159 @@
+name: Build Android Release APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_name:
+        description: "Android versionName"
+        required: false
+        default: "0.1.10"
+      version_code:
+        description: "Android versionCode"
+        required: false
+        default: "10"
+  push:
+    tags:
+      - "mobile-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-release-apk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/mobile
+    env:
+      ANDROID_PACKAGE_NAME: ${{ vars.ANDROID_PACKAGE_NAME || 'id.shizukudes.telegram_tempmail' }}
+      ANDROID_VERSION_NAME: ${{ inputs.version_name || vars.ANDROID_VERSION_NAME || '0.1.10' }}
+      ANDROID_VERSION_CODE: ${{ inputs.version_code || vars.ANDROID_VERSION_CODE || '10' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate signing secrets
+        run: |
+          test -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}"
+          test -n "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}"
+          test -n "${{ secrets.ANDROID_KEY_ALIAS }}"
+          test -n "${{ secrets.ANDROID_KEY_PASSWORD }}"
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Restore release keystore
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > android/app/upload-keystore.jks
+          cat > android/key.properties <<PROPS
+          storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
+          keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
+          storeFile=upload-keystore.jks
+          PROPS
+          chmod 600 android/key.properties android/app/upload-keystore.jks
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze mobile app
+        run: flutter analyze
+
+      - name: Run mobile tests
+        run: flutter test
+
+      - name: Build signed release APKs (split-per-abi, obfuscated, tree-shaken)
+        run: |
+          mkdir -p build/symbols
+          flutter build apk --release \
+            --split-per-abi \
+            --obfuscate \
+            --split-debug-info=build/symbols \
+            --tree-shake-icons \
+            --build-name="${ANDROID_VERSION_NAME}" \
+            --build-number="${ANDROID_VERSION_CODE}"
+
+      - name: List APK outputs with sizes
+        id: apks
+        run: |
+          cd build/app/outputs/flutter-apk
+          ls -lh *.apk
+          UNIVERSAL=""
+          if [ -f app-armeabi-v7a-release.apk ]; then
+            echo "arm32=app-armeabi-v7a-release.apk" >> "$GITHUB_OUTPUT"
+            echo "arm32_sha=$(sha256sum app-armeabi-v7a-release.apk | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+            echo "arm32_size=$(du -h app-armeabi-v7a-release.apk | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -f app-arm64-v8a-release.apk ]; then
+            echo "arm64=app-arm64-v8a-release.apk" >> "$GITHUB_OUTPUT"
+            echo "arm64_sha=$(sha256sum app-arm64-v8a-release.apk | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+            echo "arm64_size=$(du -h app-arm64-v8a-release.apk | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -f app-x86_64-release.apk ]; then
+            echo "x64=app-x86_64-release.apk" >> "$GITHUB_OUTPUT"
+            echo "x64_sha=$(sha256sum app-x86_64-release.apk | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+            echo "x64_size=$(du -h app-x86_64-release.apk | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Write release notes
+        run: |
+          cat > release-notes.md <<NOTES
+          ## Private TempMail Mobile — Signed Alpha APK
+
+          Tag: \`${GITHUB_REF_NAME}\`
+          Commit: \`${GITHUB_SHA}\`
+          Package: \`${ANDROID_PACKAGE_NAME}\`
+          Version: \`${ANDROID_VERSION_NAME}\` (code \`${ANDROID_VERSION_CODE}\`)
+
+          Signed release APKs split per ABI to minimize download size.
+          Pick the one that matches your device architecture:
+
+          | ABI | APK | Size | SHA256 |
+          | --- | --- | ---- | ------ |
+          | arm64-v8a (most modern phones) | \`app-arm64-v8a-release.apk\` | ${{ steps.apks.outputs.arm64_size }} | \`${{ steps.apks.outputs.arm64_sha }}\` |
+          | armeabi-v7a (older 32-bit phones) | \`app-armeabi-v7a-release.apk\` | ${{ steps.apks.outputs.arm32_size }} | \`${{ steps.apks.outputs.arm32_sha }}\` |
+          | x86_64 (emulators / desktop) | \`app-x86_64-release.apk\` | ${{ steps.apks.outputs.x64_size }} | \`${{ steps.apks.outputs.x64_sha }}\` |
+
+          Build flags: \`--release --split-per-abi --obfuscate --split-debug-info --tree-shake-icons\`.
+          Workflow: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          NOTES
+          cat release-notes.md
+
+      - name: Create or update GitHub Release with all APK variants
+        if: startsWith(github.ref, 'refs/tags/mobile-v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: ${{ github.workspace }}
+        run: |
+          TITLE="Mobile APK alpha ${GITHUB_REF_NAME#mobile-v}"
+          NOTES_FILE="apps/mobile/release-notes.md"
+          APK_DIR="apps/mobile/build/app/outputs/flutter-apk"
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+              --title "$TITLE" --notes-file "$NOTES_FILE" --latest
+          else
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+              --title "$TITLE" --notes-file "$NOTES_FILE" --latest
+          fi
+          for apk in "$APK_DIR"/app-*-release.apk; do
+            [ -f "$apk" ] || continue
+            gh release upload "$GITHUB_REF_NAME" "$apk" \
+              --repo "$GITHUB_REPOSITORY" --clobber
+          done
+
+      - name: Upload per-ABI APKs as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: telegram-tempmail-release-apks
+          path: apps/mobile/build/app/outputs/flutter-apk/app-*-release.apk
+          if-no-files-found: error

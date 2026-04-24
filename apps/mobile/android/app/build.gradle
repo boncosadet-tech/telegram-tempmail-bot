@@ -50,9 +50,30 @@ android {
     buildTypes {
         release {
             signingConfig = keystorePropertiesFile.exists() ? signingConfigs.release : signingConfigs.debug
-            shrinkResources = false
-            minifyEnabled = false
+            // R8 full mode + resource shrinking for the smallest signed APK.
+            shrinkResources = true
+            minifyEnabled = true
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
         }
+    }
+
+    packagingOptions {
+        resources {
+            excludes += [
+                "META-INF/*.kotlin_module",
+                "META-INF/AL2.0",
+                "META-INF/LGPL2.1",
+                "META-INF/*.version",
+                "kotlin/**",
+                "kotlin-tooling-metadata.json"
+            ]
+        }
+    }
+
+    bundle {
+        language { enableSplit = true }
+        density { enableSplit = true }
+        abi { enableSplit = true }
     }
 }
 
