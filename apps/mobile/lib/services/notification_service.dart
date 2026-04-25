@@ -62,7 +62,7 @@ class NotificationService {
       vibrationPattern: Int64List.fromList(<int>[0, 200, 100, 200]),
       ticker: 'OTP: $code',
       category: AndroidNotificationCategory.message,
-      visibility: NotificationVisibility.public,
+      visibility: NotificationVisibility.private,
       autoCancel: true,
     );
 
