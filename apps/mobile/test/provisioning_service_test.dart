@@ -23,18 +23,25 @@ void main() {
     expect(
       ProvisioningService.normalizeCatchAllTarget(<String, dynamic>{
         'actions': <Map<String, dynamic>>[
-          <String, dynamic>{'type': 'worker', 'value': <String>['telegram-tempmail']},
+          <String, dynamic>{
+            'type': 'worker',
+            'value': <String>['telegram-tempmail']
+          },
         ],
       }),
       'telegram-tempmail',
     );
   });
 
-  test('normalizeCatchAllTarget returns empty when no worker action exists', () {
+  test('normalizeCatchAllTarget returns empty when no worker action exists',
+      () {
     expect(
       ProvisioningService.normalizeCatchAllTarget(<String, dynamic>{
         'actions': <Map<String, dynamic>>[
-          <String, dynamic>{'type': 'forward', 'value': <String>['owner@example.com']},
+          <String, dynamic>{
+            'type': 'forward',
+            'value': <String>['owner@example.com']
+          },
         ],
       }),
       '',

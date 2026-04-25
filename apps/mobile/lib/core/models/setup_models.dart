@@ -21,7 +21,8 @@ class SetupDraft {
 
   String get normalizedDomain => InputValidators.normalizeDomain(domain);
 
-  String get effectiveScriptName => InputValidators.normalizeScriptName(scriptName, domain);
+  String get effectiveScriptName =>
+      InputValidators.normalizeScriptName(scriptName, domain);
 
   bool get isValid {
     return InputValidators.isCloudflareEmail(cloudflareEmail) &&
@@ -140,7 +141,10 @@ class MobileSetupState {
 
   factory MobileSetupState.fromJson(Map<String, dynamic> json) {
     final primaryDomain = json['primaryDomain']?.toString() ?? '';
-    final domains = (json['domains'] as List<dynamic>? ?? <dynamic>[]).map((item) => item.toString()).where((item) => item.isNotEmpty).toList(growable: true);
+    final domains = (json['domains'] as List<dynamic>? ?? <dynamic>[])
+        .map((item) => item.toString())
+        .where((item) => item.isNotEmpty)
+        .toList(growable: true);
     if (domains.isEmpty && primaryDomain.isNotEmpty) domains.add(primaryDomain);
     return MobileSetupState(
       primaryDomain: primaryDomain,
@@ -174,7 +178,8 @@ class StoredCredentials {
         InputValidators.isGlobalApiKey(cloudflareGlobalApiKey);
   }
 
-  bool get hasTelegramBotToken => InputValidators.isTelegramBotToken(telegramBotToken);
+  bool get hasTelegramBotToken =>
+      InputValidators.isTelegramBotToken(telegramBotToken);
 }
 
 class InboxMessage {
@@ -210,7 +215,8 @@ class InboxMessage {
       renderedHtml: row['rendered_html']?.toString() ?? '',
       otpCode: row['otp_code']?.toString() ?? '-',
       isOtp: row['is_otp']?.toString() == '1' || row['is_otp'] == true,
-      receivedAt: DateTime.fromMillisecondsSinceEpoch(_asInt(row['received_at']) * 1000),
+      receivedAt: DateTime.fromMillisecondsSinceEpoch(
+          _asInt(row['received_at']) * 1000),
     );
   }
 

@@ -1,38 +1,59 @@
 import 'package:flutter/material.dart';
 
+/// ProtonMail / Gmail-inspired color palette.
+/// Bold purple primary, clean surfaces, vivid accents.
 class AppColors {
   AppColors._();
 
-  static const primary = Color(0xFFF59E0B);
-  static const primaryVariant = Color(0xFFD97706);
-  static const background = Color(0xFFFAFAFA);
+  // Primary — ProtonMail-style deep purple
+  static const primary = Color(0xFF6D4AFF);
+  static const primaryVariant = Color(0xFF5B3DE0);
+  static const accent = Color(0xFFF59E0B);
+  static const accentVariant = Color(0xFFD97706);
+
+  // Surfaces
+  static const background = Color(0xFFF5F5FA);
   static const surface = Color(0xFFFFFFFF);
-  static const error = Color(0xFFEF4444);
-  static const success = Color(0xFF22C55E);
+  static const surfaceVariant = Color(0xFFF0EEFA);
+  static const hover = Color(0xFFEDEDF5);
+
+  // Semantic
+  static const error = Color(0xFFDC3545);
+  static const success = Color(0xFF1EA885);
   static const warning = Color(0xFFF59E0B);
-  static const pending = Color(0xFF9CA3AF);
-  static const textPrimary = Color(0xFF111827);
+  static const info = Color(0xFF3B82F6);
+  static const pending = Color(0xFFADB5BD);
+
+  // Text
+  static const textPrimary = Color(0xFF1B1D1F);
   static const textSecondary = Color(0xFF6B7280);
-  static const body = Color(0xFF374151);
+  static const body = Color(0xFF1B1D1F);
   static const onPrimary = Color(0xFFFFFFFF);
+  static const onAccent = Color(0xFFFFFFFF);
+
+  // Borders
   static const border = Color(0xFFE5E7EB);
+  static const borderStrong = Color(0xFFD1D5DB);
   static const blue = Color(0xFF3B82F6);
 
-  static const darkBackground = Color(0xFF111827);
-  static const darkSurface = Color(0xFF1F2937);
-  static const darkBorder = Color(0xFF374151);
-  static const darkText = Color(0xFFF9FAFB);
-  static const darkTextSecondary = Color(0xFFD1D5DB);
+  // Dark mode
+  static const darkBackground = Color(0xFF16141F);
+  static const darkSurface = Color(0xFF1E1B2E);
+  static const darkSurfaceVariant = Color(0xFF2A2640);
+  static const darkHover = Color(0xFF332F4D);
+  static const darkBorder = Color(0xFF3D3856);
+  static const darkText = Color(0xFFECEAF4);
+  static const darkTextSecondary = Color(0xFF9B97B0);
 }
 
 class AppSpacing {
   AppSpacing._();
 
-  static const screen = 20.0;
+  static const screen = 16.0;
   static const card = 16.0;
   static const section = 14.0;
-  static const radius = 14.0;
-  static const buttonRadius = 10.0;
+  static const radius = 12.0;
+  static const buttonRadius = 24.0;
   static const maxWidth = 520.0;
 }
 
@@ -41,9 +62,27 @@ class AppShadows {
 
   static const card = <BoxShadow>[
     BoxShadow(
-      color: Color(0x0F000000),
+      color: Color(0x0A000000),
       blurRadius: 8,
       offset: Offset(0, 2),
+    ),
+    BoxShadow(
+      color: Color(0x05000000),
+      blurRadius: 2,
+      offset: Offset(0, 1),
+    ),
+  ];
+
+  static const elevated = <BoxShadow>[
+    BoxShadow(
+      color: Color(0x14000000),
+      blurRadius: 16,
+      offset: Offset(0, 4),
+    ),
+    BoxShadow(
+      color: Color(0x08000000),
+      blurRadius: 4,
+      offset: Offset(0, 1),
     ),
   ];
 }
@@ -53,37 +92,53 @@ class AppText {
 
   static const h1 = TextStyle(
     fontSize: 24,
-    fontWeight: FontWeight.w800,
+    fontWeight: FontWeight.w700,
     color: AppColors.textPrimary,
-    height: 1.15,
+    height: 1.3,
+    letterSpacing: -0.3,
   );
 
   static const h2 = TextStyle(
-    fontSize: 18,
-    fontWeight: FontWeight.w700,
+    fontSize: 17,
+    fontWeight: FontWeight.w600,
     color: AppColors.textPrimary,
-    height: 1.25,
+    height: 1.35,
+  );
+
+  static const h3 = TextStyle(
+    fontSize: 15,
+    fontWeight: FontWeight.w600,
+    color: AppColors.textPrimary,
+    height: 1.4,
   );
 
   static const body = TextStyle(
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: FontWeight.w400,
     color: AppColors.body,
-    height: 1.45,
+    height: 1.5,
   );
 
   static const caption = TextStyle(
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: FontWeight.w400,
     color: AppColors.textSecondary,
-    height: 1.35,
+    height: 1.4,
   );
 
   static const mono = TextStyle(
     fontFamily: 'monospace',
     fontSize: 13,
     color: AppColors.body,
-    height: 1.35,
+    height: 1.4,
+  );
+
+  static const label = TextStyle(
+    fontSize: 11,
+    fontWeight: FontWeight.w600,
+    color: AppColors.textSecondary,
+    height: 1.3,
+    letterSpacing: 0.8,
   );
 }
 
@@ -92,7 +147,7 @@ Color statusColor(Object statusName) {
   return switch (value) {
     'ok' => AppColors.success,
     'failed' => AppColors.error,
-    'running' => AppColors.blue,
+    'running' => AppColors.primary,
     _ => AppColors.pending,
   };
 }

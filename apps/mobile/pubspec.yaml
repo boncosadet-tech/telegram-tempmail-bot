@@ -9,6 +9,10 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_email_sender: ^8.0.0
+  flutter_local_notifications: ^21.0.0
+  fluttertoast: ^9.0.0
+  sms_autofill: ^2.4.1
 
 
 dev_dependencies:

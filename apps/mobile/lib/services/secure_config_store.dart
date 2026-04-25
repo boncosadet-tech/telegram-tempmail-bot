@@ -4,7 +4,8 @@ import '../core/models/setup_models.dart';
 import 'native_actions.dart';
 
 class SecureConfigStore {
-  const SecureConfigStore({NativeSecureStore? nativeStore}) : _nativeStore = nativeStore ?? const NativeSecureStore();
+  const SecureConfigStore({NativeSecureStore? nativeStore})
+      : _nativeStore = nativeStore ?? const NativeSecureStore();
 
   static const setupStateKey = 'setup_state';
   static const cloudflareEmailKey = 'cloudflare_email';
@@ -23,7 +24,9 @@ class SecureConfigStore {
     try {
       final data = jsonDecode(raw) as Map<String, dynamic>;
       final state = MobileSetupState.fromJson(data);
-      if (state.primaryDomain.isEmpty || state.accountId.isEmpty || state.d1DatabaseId.isEmpty) return null;
+      if (state.primaryDomain.isEmpty ||
+          state.accountId.isEmpty ||
+          state.d1DatabaseId.isEmpty) return null;
       return state;
     } on Object {
       return null;
@@ -32,7 +35,8 @@ class SecureConfigStore {
 
   Future<void> saveCredentials(SetupDraft draft) async {
     await _nativeStore.save(cloudflareEmailKey, draft.cloudflareEmail.trim());
-    await _nativeStore.save(cloudflareGlobalApiKeyKey, draft.cloudflareGlobalApiKey.trim());
+    await _nativeStore.save(
+        cloudflareGlobalApiKeyKey, draft.cloudflareGlobalApiKey.trim());
     await _nativeStore.save(telegramBotTokenKey, draft.telegramBotToken.trim());
   }
 

@@ -15,7 +15,8 @@ void main() {
     d1DatabaseId: 'd1-id',
   );
 
-  testWidgets('locked inbox renders secure credential call to action', (tester) async {
+  testWidgets('locked inbox renders secure credential call to action',
+      (tester) async {
     var saved = false;
     var opened = '';
     await tester.pumpWidget(
@@ -33,13 +34,13 @@ void main() {
     );
 
     expect(find.text('Inbox'), findsOneWidget);
-    expect(find.text('Native inbox terkunci'), findsOneWidget);
-    expect(find.text('Save secure'), findsOneWidget);
+    expect(find.text('Native inbox locked'), findsOneWidget);
+    expect(find.text('Save credentials'), findsOneWidget);
 
-    await tester.tap(find.text('Save secure'));
+    await tester.tap(find.text('Save credentials'));
     expect(saved, isTrue);
 
-    await tester.tap(find.text('Web'));
+    await tester.tap(find.text('Web dashboard'));
     expect(opened, state.dashboardUrl);
   });
 }

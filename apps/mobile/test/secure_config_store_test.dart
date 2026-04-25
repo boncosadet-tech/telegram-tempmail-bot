@@ -11,8 +11,10 @@ void main() {
 
   setUp(() {
     values.clear();
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) async {
-      final args = Map<String, dynamic>.from(call.arguments as Map<dynamic, dynamic>? ?? <dynamic, dynamic>{});
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      final args = Map<String, dynamic>.from(
+          call.arguments as Map<dynamic, dynamic>? ?? <dynamic, dynamic>{});
       switch (call.method) {
         case 'secureSave':
           values[args['key'].toString()] = args['value'].toString();
@@ -31,7 +33,8 @@ void main() {
   });
 
   tearDown(() {
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, null);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, null);
   });
 
   test('setup state persists through native secure channel', () async {

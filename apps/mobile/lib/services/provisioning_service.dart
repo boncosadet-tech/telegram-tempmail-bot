@@ -53,7 +53,8 @@ class ProvisioningService {
     ];
   }
 
-  Stream<ProvisioningUpdate> runSetup(SetupDraft draft, {required String workerSource}) async* {
+  Stream<ProvisioningUpdate> runSetup(SetupDraft draft,
+      {required String workerSource}) async* {
     var steps = initialSteps();
     String currentStep = 'telegram';
     String? accountId;
@@ -65,60 +66,79 @@ class ProvisioningService {
 
     final domain = draft.normalizedDomain;
     final scriptName = draft.effectiveScriptName;
-    final cf = CloudflareApi(email: draft.cloudflareEmail.trim(), globalApiKey: draft.cloudflareGlobalApiKey.trim());
+    final cf = CloudflareApi(
+        email: draft.cloudflareEmail.trim(),
+        globalApiKey: draft.cloudflareGlobalApiKey.trim());
     final tg = TelegramApi(draft.telegramBotToken.trim());
     final webhookSecret = _randomToken(36);
 
     try {
       currentStep = 'telegram';
-      steps = _setStep(steps, currentStep, ProvisioningStepStatus.running, 'Checking bot token');
+      steps = _setStep(steps, currentStep, ProvisioningStepStatus.running,
+          'Checking bot token');
       yield ProvisioningUpdate(steps: steps);
       final bot = await tg.getMe();
       botUsername = bot['username']?.toString() ?? '';
       if (botUsername.isEmpty) {
-        throw ProvisioningException('Telegram bot harus punya username sebelum setup.');
+        throw ProvisioningException(
+            'Telegram bot harus punya username sebelum setup.');
       }
-      steps = _setStep(steps, currentStep, ProvisioningStepStatus.ok, '@$botUsername');
+      steps = _setStep(
+          steps, currentStep, ProvisioningStepStatus.ok, '@$botUsername');
       yield ProvisioningUpdate(steps: steps);
 
       currentStep = 'zone';
-      steps = _setStep(steps, currentStep, ProvisioningStepStatus.running, domain);
+      steps =
+          _setStep(steps, currentStep, ProvisioningStepStatus.running, domain);
       yield ProvisioningUpdate(steps: steps);
       final zone = await cf.getActiveZone(domain);
       zoneId = zone['id']?.toString();
-      accountId = (zone['account'] as Map<dynamic, dynamic>?)?['id']?.toString();
-      if (zoneId == null || zoneId.isEmpty || accountId == null || accountId.isEmpty) {
-        throw ProvisioningException('Cloudflare zone tidak punya zone/account id.');
+      accountId =
+          (zone['account'] as Map<dynamic, dynamic>?)?['id']?.toString();
+      if (zoneId == null ||
+          zoneId.isEmpty ||
+          accountId == null ||
+          accountId.isEmpty) {
+        throw ProvisioningException(
+            'Cloudflare zone tidak punya zone/account id.');
       }
       accountSubdomain = await cf.getAccountWorkersSubdomain(accountId);
-      steps = _setStep(steps, currentStep, ProvisioningStepStatus.ok, '${zone['name']} ($zoneId)');
+      steps = _setStep(steps, currentStep, ProvisioningStepStatus.ok,
+          '${zone['name']} ($zoneId)');
       yield ProvisioningUpdate(steps: steps);
 
       currentStep = 'kv';
-      steps = _setStep(steps, currentStep, ProvisioningStepStatus.running, 'telegram-tempmail:$domain');
+      steps = _setStep(steps, currentStep, ProvisioningStepStatus.running,
+          'telegram-tempmail:$domain');
       yield ProvisioningUpdate(steps: steps);
-      final kv = await cf.findOrCreateKVNamespace(accountId, 'telegram-tempmail:$domain');
+      final kv = await cf.findOrCreateKVNamespace(
+          accountId, 'telegram-tempmail:$domain');
       kvNamespaceId = kv['id']?.toString();
       if (kvNamespaceId == null || kvNamespaceId.isEmpty) {
         throw ProvisioningException('KV namespace id kosong.');
       }
-      steps = _setStep(steps, currentStep, ProvisioningStepStatus.ok, kvNamespaceId);
+      steps = _setStep(
+          steps, currentStep, ProvisioningStepStatus.ok, kvNamespaceId);
       yield ProvisioningUpdate(steps: steps);
 
       currentStep = 'd1';
-      final d1Name = InputValidators.normalizeScriptName('telegram-tempmail-$domain', domain);
-      steps = _setStep(steps, currentStep, ProvisioningStepStatus.running, d1Name);
+      final d1Name = InputValidators.normalizeScriptName(
+          'telegram-tempmail-$domain', domain);
+      steps =
+          _setStep(steps, currentStep, ProvisioningStepStatus.running, d1Name);
       yield ProvisioningUpdate(steps: steps);
       final d1 = await cf.findOrCreateD1Database(accountId, d1Name);
       d1DatabaseId = (d1['uuid'] ?? d1['id'])?.toString();
       if (d1DatabaseId == null || d1DatabaseId.isEmpty) {
         throw ProvisioningException('D1 database id kosong.');
       }
-      steps = _setStep(steps, currentStep, ProvisioningStepStatus.ok, d1DatabaseId);
+      steps =
+          _setStep(steps, currentStep, ProvisioningStepStatus.ok, d1DatabaseId);
       yield ProvisioningUpdate(steps: steps);
 
       currentStep = 'worker';
-      steps = _setStep(steps, currentStep, ProvisioningStepStatus.running, scriptName);
+      steps = _setStep(
+          steps, currentStep, ProvisioningStepStatus.running, scriptName);
       yield ProvisioningUpdate(steps: steps);
       await cf.uploadWorkerScript(
         accountId: accountId,
@@ -129,77 +149,99 @@ class ProvisioningService {
         compatibilityDate: '2026-04-18',
         d1DatabaseId: d1DatabaseId,
       );
-      steps = _setStep(steps, currentStep, ProvisioningStepStatus.ok, scriptName);
+      steps =
+          _setStep(steps, currentStep, ProvisioningStepStatus.ok, scriptName);
       yield ProvisioningUpdate(steps: steps);
 
       currentStep = 'schema';
-      steps = _setStep(steps, currentStep, ProvisioningStepStatus.running, 'Creating inbox tables');
+      steps = _setStep(steps, currentStep, ProvisioningStepStatus.running,
+          'Creating inbox tables');
       yield ProvisioningUpdate(steps: steps);
       for (final statement in _d1SchemaStatements) {
         await cf.queryD1(accountId, d1DatabaseId, statement);
       }
       try {
-        await cf.queryD1(accountId, d1DatabaseId, "ALTER TABLE messages ADD COLUMN rendered_html TEXT NOT NULL DEFAULT ''");
+        await cf.queryD1(accountId, d1DatabaseId,
+            "ALTER TABLE messages ADD COLUMN rendered_html TEXT NOT NULL DEFAULT ''");
       } on Object catch (error) {
-        if (!error.toString().toLowerCase().contains('duplicate column')) rethrow;
+        if (!error.toString().toLowerCase().contains('duplicate column'))
+          rethrow;
       }
-      steps = _setStep(steps, currentStep, ProvisioningStepStatus.ok, 'Schema ready');
+      steps = _setStep(
+          steps, currentStep, ProvisioningStepStatus.ok, 'Schema ready');
       yield ProvisioningUpdate(steps: steps);
 
       currentStep = 'secrets';
-      steps = _setStep(steps, currentStep, ProvisioningStepStatus.running, 'BOT_TOKEN + WEBHOOK_SECRET');
+      steps = _setStep(steps, currentStep, ProvisioningStepStatus.running,
+          'BOT_TOKEN + WEBHOOK_SECRET');
       yield ProvisioningUpdate(steps: steps);
-      await cf.setWorkerSecret(accountId, scriptName, 'BOT_TOKEN', draft.telegramBotToken.trim());
-      await cf.setWorkerSecret(accountId, scriptName, 'WEBHOOK_SECRET', webhookSecret);
-      await cf.putKVValue(accountId, kvNamespaceId, 'domains', jsonEncode(<String>[domain]));
-      steps = _setStep(steps, currentStep, ProvisioningStepStatus.ok, 'Secrets stored');
+      await cf.setWorkerSecret(
+          accountId, scriptName, 'BOT_TOKEN', draft.telegramBotToken.trim());
+      await cf.setWorkerSecret(
+          accountId, scriptName, 'WEBHOOK_SECRET', webhookSecret);
+      await cf.putKVValue(
+          accountId, kvNamespaceId, 'domains', jsonEncode(<String>[domain]));
+      steps = _setStep(
+          steps, currentStep, ProvisioningStepStatus.ok, 'Secrets stored');
       yield ProvisioningUpdate(steps: steps);
 
       currentStep = 'subdomain';
-      steps = _setStep(steps, currentStep, ProvisioningStepStatus.running, accountSubdomain);
+      steps = _setStep(
+          steps, currentStep, ProvisioningStepStatus.running, accountSubdomain);
       yield ProvisioningUpdate(steps: steps);
       await cf.enableWorkerSubdomain(accountId, scriptName);
       final workerUrl = 'https://$scriptName.$accountSubdomain.workers.dev';
-      steps = _setStep(steps, currentStep, ProvisioningStepStatus.ok, workerUrl);
+      steps =
+          _setStep(steps, currentStep, ProvisioningStepStatus.ok, workerUrl);
       yield ProvisioningUpdate(steps: steps);
 
       currentStep = 'routing';
-      steps = _setStep(steps, currentStep, ProvisioningStepStatus.running, 'Enable routing DNS');
+      steps = _setStep(steps, currentStep, ProvisioningStepStatus.running,
+          'Enable routing DNS');
       yield ProvisioningUpdate(steps: steps);
       try {
         await cf.enableEmailRoutingDns(zoneId);
       } on CloudflareApiException catch (error) {
         if (!error.hasCode(2008) || !draft.replaceExistingMxRecords) rethrow;
-        steps = _setStep(steps, currentStep, ProvisioningStepStatus.running, 'Deleting old non-Cloudflare MX records');
+        steps = _setStep(steps, currentStep, ProvisioningStepStatus.running,
+            'Deleting old non-Cloudflare MX records');
         yield ProvisioningUpdate(steps: steps);
         final deleted = await cf.deleteNonCloudflareMxRecords(zoneId);
         await cf.enableEmailRoutingDns(zoneId);
-        steps = _setStep(steps, currentStep, ProvisioningStepStatus.ok, 'Email Routing DNS ready; deleted $deleted old MX record(s)');
+        steps = _setStep(steps, currentStep, ProvisioningStepStatus.ok,
+            'Email Routing DNS ready; deleted $deleted old MX record(s)');
         yield ProvisioningUpdate(steps: steps);
       }
-      if (steps.firstWhere((step) => step.id == currentStep).status != ProvisioningStepStatus.ok) {
-        steps = _setStep(steps, currentStep, ProvisioningStepStatus.ok, 'Email Routing DNS ready');
+      if (steps.firstWhere((step) => step.id == currentStep).status !=
+          ProvisioningStepStatus.ok) {
+        steps = _setStep(steps, currentStep, ProvisioningStepStatus.ok,
+            'Email Routing DNS ready');
         yield ProvisioningUpdate(steps: steps);
       }
 
       currentStep = 'catchall';
-      steps = _setStep(steps, currentStep, ProvisioningStepStatus.running, 'Check catch-all');
+      steps = _setStep(steps, currentStep, ProvisioningStepStatus.running,
+          'Check catch-all');
       yield ProvisioningUpdate(steps: steps);
       final catchAll = await cf.getCatchAllRule(zoneId);
       final existingTarget = normalizeCatchAllTarget(catchAll);
       if (existingTarget.isNotEmpty && existingTarget != scriptName) {
-        throw ProvisioningException('Catch-all sudah mengarah ke Worker "$existingTarget". Mobile MVP belum force replace; pakai npm admin --force dulu.');
+        throw ProvisioningException(
+            'Catch-all sudah mengarah ke Worker "$existingTarget". Mobile MVP belum force replace; pakai npm admin --force dulu.');
       }
       await cf.setCatchAllWorker(zoneId, scriptName);
-      steps = _setStep(steps, currentStep, ProvisioningStepStatus.ok, scriptName);
+      steps =
+          _setStep(steps, currentStep, ProvisioningStepStatus.ok, scriptName);
       yield ProvisioningUpdate(steps: steps);
 
       currentStep = 'webhook';
       final webhookUrl = '$workerUrl/tg/$webhookSecret';
-      steps = _setStep(steps, currentStep, ProvisioningStepStatus.running, 'Set Telegram webhook');
+      steps = _setStep(steps, currentStep, ProvisioningStepStatus.running,
+          'Set Telegram webhook');
       yield ProvisioningUpdate(steps: steps);
       await tg.setWebhook(url: webhookUrl, secretToken: webhookSecret);
-      steps = _setStep(steps, currentStep, ProvisioningStepStatus.ok, 'Webhook ready');
+      steps = _setStep(
+          steps, currentStep, ProvisioningStepStatus.ok, 'Webhook ready');
       final state = MobileSetupState(
         primaryDomain: domain,
         scriptName: scriptName,
@@ -215,25 +257,30 @@ class ProvisioningService {
       );
       yield ProvisioningUpdate(steps: steps, state: state);
     } on Object catch (error) {
-      steps = _setStep(steps, currentStep, ProvisioningStepStatus.failed, error.toString());
+      steps = _setStep(
+          steps, currentStep, ProvisioningStepStatus.failed, error.toString());
       yield ProvisioningUpdate(steps: steps, error: error.toString());
     }
   }
 
-
   Future<MobileSetupState> connectExisting(SetupDraft draft) async {
     if (!draft.isControlValid) {
-      throw ProvisioningException('Isi Cloudflare email, Global API Key, domain, dan Worker script name untuk control existing. Bot token boleh kosong.');
+      throw ProvisioningException(
+          'Isi Cloudflare email, Global API Key, domain, dan Worker script name untuk control existing. Bot token boleh kosong.');
     }
 
     final domain = draft.normalizedDomain;
     final scriptName = draft.effectiveScriptName;
-    final cf = CloudflareApi(email: draft.cloudflareEmail.trim(), globalApiKey: draft.cloudflareGlobalApiKey.trim());
+    final cf = CloudflareApi(
+        email: draft.cloudflareEmail.trim(),
+        globalApiKey: draft.cloudflareGlobalApiKey.trim());
     final zone = await cf.getActiveZone(domain);
     final zoneId = zone['id']?.toString() ?? '';
-    final accountId = (zone['account'] as Map<dynamic, dynamic>?)?['id']?.toString() ?? '';
+    final accountId =
+        (zone['account'] as Map<dynamic, dynamic>?)?['id']?.toString() ?? '';
     if (zoneId.isEmpty || accountId.isEmpty) {
-      throw ProvisioningException('Cloudflare zone tidak punya zone/account id.');
+      throw ProvisioningException(
+          'Cloudflare zone tidak punya zone/account id.');
     }
 
     final accountSubdomain = await cf.getAccountWorkersSubdomain(accountId);
@@ -242,7 +289,8 @@ class ProvisioningService {
     final kvNamespaceId = bindingIds['kv'] ?? '';
     final d1DatabaseId = bindingIds['d1'] ?? '';
     if (d1DatabaseId.isEmpty) {
-      throw ProvisioningException('Worker "$scriptName" tidak punya D1 binding MAIL_DB. Tidak bisa membuka native inbox.');
+      throw ProvisioningException(
+          'Worker "$scriptName" tidak punya D1 binding MAIL_DB. Tidak bisa membuka native inbox.');
     }
 
     final domains = <String>{domain};
@@ -253,7 +301,8 @@ class ProvisioningService {
           final parsed = jsonDecode(kvRaw);
           if (parsed is List<dynamic>) {
             for (final value in parsed) {
-              final normalized = InputValidators.normalizeDomain(value.toString());
+              final normalized =
+                  InputValidators.normalizeDomain(value.toString());
               if (normalized.isNotEmpty) domains.add(normalized);
             }
           }
@@ -274,7 +323,7 @@ class ProvisioningService {
     }
 
     final workerUrl = 'https://$scriptName.$accountSubdomain.workers.dev';
-    final orderedDomains = domains.toList(growable: false)..sort();
+    final orderedDomains = domains.toList()..sort();
     orderedDomains.remove(domain);
     orderedDomains.insert(0, domain);
     return MobileSetupState(
@@ -284,14 +333,14 @@ class ProvisioningService {
       dashboardUrl: '$workerUrl/app',
       botUsername: botUsername,
       domains: orderedDomains,
-      claimLink: botUsername.isEmpty ? '' : 'https://t.me/$botUsername?start=claim',
+      claimLink:
+          botUsername.isEmpty ? '' : 'https://t.me/$botUsername?start=claim',
       accountId: accountId,
       zoneId: zoneId,
       kvNamespaceId: kvNamespaceId,
       d1DatabaseId: d1DatabaseId,
     );
   }
-
 
   Future<MobileSetupState> addDomain({
     required SetupDraft draft,
@@ -304,27 +353,35 @@ class ProvisioningService {
       throw ProvisioningException('Domain tambahan tidak valid: $domain');
     }
     if (state.accountId.isEmpty || state.scriptName.isEmpty) {
-      throw ProvisioningException('Setup state belum lengkap. Jalankan setup utama dulu.');
+      throw ProvisioningException(
+          'Setup state belum lengkap. Jalankan setup utama dulu.');
     }
 
-    final cf = CloudflareApi(email: draft.cloudflareEmail.trim(), globalApiKey: draft.cloudflareGlobalApiKey.trim());
+    final cf = CloudflareApi(
+        email: draft.cloudflareEmail.trim(),
+        globalApiKey: draft.cloudflareGlobalApiKey.trim());
     final zone = await cf.getActiveZone(newDomain);
     final zoneId = zone['id']?.toString() ?? '';
-    final zoneAccountId = (zone['account'] as Map<dynamic, dynamic>?)?['id']?.toString() ?? '';
+    final zoneAccountId =
+        (zone['account'] as Map<dynamic, dynamic>?)?['id']?.toString() ?? '';
     if (zoneId.isEmpty || zoneAccountId.isEmpty) {
-      throw ProvisioningException('Cloudflare zone tambahan tidak punya zone/account id.');
+      throw ProvisioningException(
+          'Cloudflare zone tambahan tidak punya zone/account id.');
     }
     if (zoneAccountId != state.accountId) {
-      throw ProvisioningException('Domain $newDomain ada di akun Cloudflare berbeda. Gunakan akun yang sama dengan ${state.primaryDomain}.');
+      throw ProvisioningException(
+          'Domain $newDomain ada di akun Cloudflare berbeda. Gunakan akun yang sama dengan ${state.primaryDomain}.');
     }
 
     String namespaceId = state.kvNamespaceId;
     if (namespaceId.isEmpty) {
-      final settings = await cf.getWorkerSettings(state.accountId, state.scriptName);
+      final settings =
+          await cf.getWorkerSettings(state.accountId, state.scriptName);
       final bindings = settings['bindings'];
       if (bindings is List<dynamic>) {
         for (final binding in bindings) {
-          final item = Map<String, dynamic>.from(binding as Map<dynamic, dynamic>);
+          final item =
+              Map<String, dynamic>.from(binding as Map<dynamic, dynamic>);
           if (item['type'] == 'kv_namespace' && item['name'] == 'STATE_KV') {
             namespaceId = item['namespace_id']?.toString() ?? '';
           }
@@ -332,13 +389,17 @@ class ProvisioningService {
       }
     }
     if (namespaceId.isEmpty) {
-      throw ProvisioningException('STATE_KV binding tidak ditemukan; tidak bisa menyimpan daftar domain.');
+      throw ProvisioningException(
+          'STATE_KV binding tidak ditemukan; tidak bisa menyimpan daftar domain.');
     }
 
     final catchAll = await cf.getCatchAllRule(zoneId);
     final existingTarget = normalizeCatchAllTarget(catchAll);
-    if (existingTarget.isNotEmpty && existingTarget != state.scriptName && !force) {
-      throw ProvisioningException('Catch-all $newDomain sudah mengarah ke Worker "$existingTarget". Aktifkan force hanya untuk domain test/kosong.');
+    if (existingTarget.isNotEmpty &&
+        existingTarget != state.scriptName &&
+        !force) {
+      throw ProvisioningException(
+          'Catch-all $newDomain sudah mengarah ke Worker "$existingTarget". Aktifkan force hanya untuk domain test/kosong.');
     }
 
     try {
@@ -351,13 +412,16 @@ class ProvisioningService {
     await cf.setCatchAllWorker(zoneId, state.scriptName);
 
     final kvRaw = await cf.getKVValue(state.accountId, namespaceId, 'domains');
-    final domains = <String>{...state.domains.map(InputValidators.normalizeDomain)};
+    final domains = <String>{
+      ...state.domains.map(InputValidators.normalizeDomain)
+    };
     if (kvRaw != null && kvRaw.trim().isNotEmpty) {
       try {
         final parsed = jsonDecode(kvRaw);
         if (parsed is List<dynamic>) {
           for (final value in parsed) {
-            final normalized = InputValidators.normalizeDomain(value.toString());
+            final normalized =
+                InputValidators.normalizeDomain(value.toString());
             if (normalized.isNotEmpty) domains.add(normalized);
           }
         }
@@ -366,10 +430,12 @@ class ProvisioningService {
       }
     }
     domains.add(newDomain);
-    final orderedDomains = domains.where((value) => value.isNotEmpty).toList(growable: false)..sort();
+    final orderedDomains = domains.where((value) => value.isNotEmpty).toList()
+      ..sort();
     orderedDomains.remove(state.primaryDomain);
     orderedDomains.insert(0, state.primaryDomain);
-    await cf.putKVValue(state.accountId, namespaceId, 'domains', jsonEncode(orderedDomains));
+    await cf.putKVValue(
+        state.accountId, namespaceId, 'domains', jsonEncode(orderedDomains));
 
     return state.copyWith(
       domains: orderedDomains,
@@ -377,7 +443,8 @@ class ProvisioningService {
     );
   }
 
-  static Map<String, String> _extractWorkerBindingIds(Map<String, dynamic> settings) {
+  static Map<String, String> _extractWorkerBindingIds(
+      Map<String, dynamic> settings) {
     final result = <String, String>{};
     final bindings = settings['bindings'];
     if (bindings is! List<dynamic>) return result;
@@ -403,7 +470,8 @@ class ProvisioningService {
       final item = Map<String, dynamic>.from(action as Map<dynamic, dynamic>);
       if (item['type'] != 'worker') continue;
       final value = item['value'];
-      if (value is List<dynamic> && value.isNotEmpty) return value.first.toString();
+      if (value is List<dynamic> && value.isNotEmpty)
+        return value.first.toString();
     }
     return '';
   }
@@ -415,14 +483,18 @@ class ProvisioningService {
     String detail,
   ) {
     return steps
-        .map((step) => step.id == id ? step.copyWith(status: status, detail: detail) : step)
+        .map((step) => step.id == id
+            ? step.copyWith(status: status, detail: detail)
+            : step)
         .toList(growable: false);
   }
 
   static String _randomToken(int length) {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+    const chars =
+        'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
     final random = Random.secure();
-    return List<String>.generate(length, (_) => chars[random.nextInt(chars.length)]).join();
+    return List<String>.generate(
+        length, (_) => chars[random.nextInt(chars.length)]).join();
   }
 }
 

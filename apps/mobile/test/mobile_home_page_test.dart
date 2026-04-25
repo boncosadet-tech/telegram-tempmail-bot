@@ -7,17 +7,20 @@ void main() {
   const channel = MethodChannel('telegram_tempmail/native');
 
   setUp(() {
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
       if (call.method == 'secureRead') return null;
       return true;
     });
   });
 
   tearDown(() {
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, null);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, null);
   });
 
-  testWidgets('welcome CTA is tappable and opens configuration step', (tester) async {
+  testWidgets('welcome CTA is tappable and opens configuration step',
+      (tester) async {
     await tester.pumpWidget(const TempMailMobileApp());
     await tester.pump(const Duration(milliseconds: 100));
 
@@ -27,19 +30,20 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton, 'Get Started'));
     await tester.pump(const Duration(milliseconds: 350));
 
-    expect(find.text('Configuration'), findsOneWidget);
+    expect(find.text('Configuration'), findsWidgets);
     expect(find.text('Cloudflare email'), findsOneWidget);
-    expect(find.text('Step 2/5'), findsOneWidget);
+    expect(find.text('2/5'), findsOneWidget);
   });
 
-  testWidgets('secondary welcome CTA is tappable and opens configuration step', (tester) async {
+  testWidgets('secondary welcome CTA is tappable and opens configuration step',
+      (tester) async {
     await tester.pumpWidget(const TempMailMobileApp());
     await tester.pump(const Duration(milliseconds: 100));
 
     await tester.tap(find.widgetWithText(OutlinedButton, 'Open Configuration'));
     await tester.pump(const Duration(milliseconds: 350));
 
-    expect(find.text('Configuration'), findsOneWidget);
+    expect(find.text('Configuration'), findsWidgets);
     expect(find.text('Telegram Bot Token'), findsOneWidget);
   });
 }

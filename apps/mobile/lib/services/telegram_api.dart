@@ -22,22 +22,33 @@ class TelegramApi {
     return _request('setWebhook', <String, dynamic>{
       'url': url,
       'secret_token': secretToken,
-      'allowed_updates': <String>['message', 'edited_message', 'callback_query'],
+      'allowed_updates': <String>[
+        'message',
+        'edited_message',
+        'callback_query'
+      ],
       'drop_pending_updates': false,
     });
   }
 
-  Future<Map<String, dynamic>> _request(String method, [Map<String, dynamic>? payload]) async {
+  Future<Map<String, dynamic>> _request(String method,
+      [Map<String, dynamic>? payload]) async {
     final client = HttpClient()..connectionTimeout = _networkTimeout;
     try {
-      final request = await client.postUrl(Uri.parse('https://api.telegram.org/bot$botToken/$method'));
+      final request = await client
+          .postUrl(Uri.parse('https://api.telegram.org/bot$botToken/$method'));
       request.headers.contentType = ContentType.json;
       request.write(jsonEncode(payload ?? <String, dynamic>{}));
       final response = await request.close().timeout(_networkTimeout);
       final raw = await utf8.decodeStream(response).timeout(_networkTimeout);
-      final data = raw.isEmpty ? <String, dynamic>{} : jsonDecode(raw) as Map<String, dynamic>;
-      if (response.statusCode < 200 || response.statusCode >= 300 || data['ok'] == false) {
-        throw TelegramApiException('Telegram API gagal (${response.statusCode}): $raw');
+      final data = raw.isEmpty
+          ? <String, dynamic>{}
+          : jsonDecode(raw) as Map<String, dynamic>;
+      if (response.statusCode < 200 ||
+          response.statusCode >= 300 ||
+          data['ok'] == false) {
+        throw TelegramApiException(
+            'Telegram API gagal (${response.statusCode}): $raw');
       }
       final result = data['result'];
       if (result is Map<dynamic, dynamic>) {

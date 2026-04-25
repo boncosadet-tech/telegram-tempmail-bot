@@ -3,7 +3,8 @@ class InputValidators {
     r'^(?!-)(?:[a-z0-9-]{1,63}\.)+[a-z]{2,63}$',
   );
 
-  static final RegExp _scriptPattern = RegExp(r'^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$');
+  static final RegExp _scriptPattern =
+      RegExp(r'^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$');
 
   static String normalizeDomain(String value) {
     return value
@@ -36,7 +37,9 @@ class InputValidators {
   }
 
   static String normalizeScriptName(String value, String domain) {
-    final raw = value.trim().isEmpty ? 'telegram-tempmail-${normalizeDomain(domain)}' : value.trim();
+    final raw = value.trim().isEmpty
+        ? 'telegram-tempmail-${normalizeDomain(domain)}'
+        : value.trim();
     var script = raw
         .toLowerCase()
         .replaceAll(RegExp(r'[^a-z0-9-]+'), '-')

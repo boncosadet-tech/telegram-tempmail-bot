@@ -11,7 +11,9 @@ class InboxService {
     required StoredCredentials credentials,
   }) async {
     _ensureReady(state, credentials);
-    final api = CloudflareApi(email: credentials.cloudflareEmail, globalApiKey: credentials.cloudflareGlobalApiKey);
+    final api = CloudflareApi(
+        email: credentials.cloudflareEmail,
+        globalApiKey: credentials.cloudflareGlobalApiKey);
     final rows = await api.queryD1(
       state.accountId,
       state.d1DatabaseId,
@@ -20,7 +22,10 @@ FROM messages
 ORDER BY received_at DESC
 LIMIT $pageSize''',
     );
-    return rows.map(InboxMessage.fromD1Row).where((message) => message.id.isNotEmpty).toList(growable: false);
+    return rows
+        .map(InboxMessage.fromD1Row)
+        .where((message) => message.id.isNotEmpty)
+        .toList(growable: false);
   }
 
   Future<InboxMessage?> getMessage({
@@ -30,7 +35,9 @@ LIMIT $pageSize''',
   }) async {
     _ensureReady(state, credentials);
     if (id.trim().isEmpty) return null;
-    final api = CloudflareApi(email: credentials.cloudflareEmail, globalApiKey: credentials.cloudflareGlobalApiKey);
+    final api = CloudflareApi(
+        email: credentials.cloudflareEmail,
+        globalApiKey: credentials.cloudflareGlobalApiKey);
     final rows = await api.queryD1(
       state.accountId,
       state.d1DatabaseId,
@@ -51,8 +58,11 @@ LIMIT 1''',
   }) async {
     _ensureReady(state, credentials);
     if (id.trim().isEmpty) return;
-    final api = CloudflareApi(email: credentials.cloudflareEmail, globalApiKey: credentials.cloudflareGlobalApiKey);
-    await api.queryD1(state.accountId, state.d1DatabaseId, 'DELETE FROM messages WHERE id = ?', <Object?>[id]);
+    final api = CloudflareApi(
+        email: credentials.cloudflareEmail,
+        globalApiKey: credentials.cloudflareGlobalApiKey);
+    await api.queryD1(state.accountId, state.d1DatabaseId,
+        'DELETE FROM messages WHERE id = ?', <Object?>[id]);
   }
 
   Future<void> purgeOtp({
@@ -60,16 +70,21 @@ LIMIT 1''',
     required StoredCredentials credentials,
   }) async {
     _ensureReady(state, credentials);
-    final api = CloudflareApi(email: credentials.cloudflareEmail, globalApiKey: credentials.cloudflareGlobalApiKey);
-    await api.queryD1(state.accountId, state.d1DatabaseId, 'DELETE FROM messages WHERE is_otp = 1');
+    final api = CloudflareApi(
+        email: credentials.cloudflareEmail,
+        globalApiKey: credentials.cloudflareGlobalApiKey);
+    await api.queryD1(state.accountId, state.d1DatabaseId,
+        'DELETE FROM messages WHERE is_otp = 1');
   }
 
   void _ensureReady(MobileSetupState state, StoredCredentials credentials) {
     if (!credentials.isComplete) {
-      throw StateError('Credential Cloudflare belum lengkap. Input ulang credential untuk inbox native.');
+      throw StateError(
+          'Credential Cloudflare belum lengkap. Input ulang credential untuk inbox native.');
     }
     if (state.accountId.isEmpty || state.d1DatabaseId.isEmpty) {
-      throw StateError('Setup state belum punya accountId/D1 database id. Jalankan setup ulang dari app.');
+      throw StateError(
+          'Setup state belum punya accountId/D1 database id. Jalankan setup ulang dari app.');
     }
   }
 }

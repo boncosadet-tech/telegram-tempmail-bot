@@ -35,10 +35,11 @@ jobs:
 
       - name: Validate signing secrets
         run: |
-          test -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}"
-          test -n "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}"
-          test -n "${{ secrets.ANDROID_KEY_ALIAS }}"
-          test -n "${{ secrets.ANDROID_KEY_PASSWORD }}"
+          test -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" || { echo "::error::Missing ANDROID_KEYSTORE_BASE64"; exit 1; }
+          test -n "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" || { echo "::error::Missing ANDROID_KEYSTORE_PASSWORD"; exit 1; }
+          test -n "${{ secrets.ANDROID_KEY_ALIAS }}" || { echo "::error::Missing ANDROID_KEY_ALIAS"; exit 1; }
+          test -n "${{ secrets.ANDROID_KEY_PASSWORD }}" || { echo "::error::Missing ANDROID_KEY_PASSWORD"; exit 1; }
+          test -n "${{ secrets.TOKEN_PAT_GITHUB_FULL_SCOPE }}" || { echo "::error::Missing TOKEN_PAT_GITHUB_FULL_SCOPE"; exit 1; }
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -53,14 +54,15 @@ jobs:
           cache: true
 
       - name: Restore release keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
-          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > android/app/upload-keystore.jks
-          cat > android/key.properties <<PROPS
-          storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
-          keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
-          storeFile=upload-keystore.jks
-          PROPS
+          echo "$KEYSTORE_BASE64" | base64 --decode > android/app/upload-keystore.jks
+          printf 'storePassword=%s\nkeyPassword=%s\nkeyAlias=%s\nstoreFile=upload-keystore.jks\n' \
+            "$STORE_PASSWORD" "$KEY_PASSWORD" "$KEY_ALIAS" > android/key.properties
           chmod 600 android/key.properties android/app/upload-keystore.jks
 
       - name: Install dependencies
@@ -107,8 +109,11 @@ jobs:
 
       - name: Write release notes
         run: |
-          cat > release-notes.md <<NOTES
+          cat > release-notes.md <<'EOF'
           ## Private TempMail Mobile — Signed Alpha APK
+          EOF
+          sed -i 's/^[[:space:]]*//' release-notes.md
+          cat >> release-notes.md <<NOTES
 
           Tag: \`${GITHUB_REF_NAME}\`
           Commit: \`${GITHUB_SHA}\`
@@ -127,12 +132,13 @@ jobs:
           Build flags: \`--release --split-per-abi --obfuscate --split-debug-info --tree-shake-icons\`.
           Workflow: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
           NOTES
+          sed -i 's/^          //' release-notes.md
           cat release-notes.md
 
       - name: Create or update GitHub Release with all APK variants
         if: startsWith(github.ref, 'refs/tags/mobile-v')
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.TOKEN_PAT_GITHUB_FULL_SCOPE }}
         working-directory: ${{ github.workspace }}
         run: |
           TITLE="Mobile APK alpha ${GITHUB_REF_NAME#mobile-v}"
