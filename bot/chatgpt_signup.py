@@ -204,6 +204,87 @@ def d1_query_params(account_id: str, db_id: str, sql: str, params: list) -> dict
     return json.loads(payload)
 
 
+_ACCOUNTS_TABLE_READY = False
+
+
+def ensure_accounts_table(account_id: str, db_id: str) -> None:
+    """Create the chatgpt_accounts table if it doesn't already exist."""
+    global _ACCOUNTS_TABLE_READY
+    if _ACCOUNTS_TABLE_READY:
+        return
+    sql = (
+        "CREATE TABLE IF NOT EXISTS chatgpt_accounts ("
+        "email TEXT PRIMARY KEY, "
+        "password TEXT NOT NULL, "
+        "full_name TEXT, "
+        "alias_local TEXT, "
+        "age INTEGER, "
+        "created_at INTEGER NOT NULL"
+        ")"
+    )
+    d1_query_params(account_id, db_id, sql, [])
+    _ACCOUNTS_TABLE_READY = True
+
+
+def record_account(account_id: str, db_id: str, result: dict) -> None:
+    """Persist a freshly-created ChatGPT account to D1."""
+    ensure_accounts_table(account_id, db_id)
+    sql = (
+        "INSERT INTO chatgpt_accounts "
+        "(email, password, full_name, alias_local, age, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(email) DO UPDATE SET "
+        "password = excluded.password, "
+        "full_name = excluded.full_name, "
+        "alias_local = excluded.alias_local, "
+        "age = excluded.age, "
+        "created_at = excluded.created_at"
+    )
+    now_ms = int(time.time() * 1000)
+    alias_local = result["email"].split("@", 1)[0]
+    d1_query_params(account_id, db_id, sql, [
+        result["email"], result["password"], result.get("full_name", ""),
+        alias_local, int(result.get("age") or 0), now_ms,
+    ])
+
+
+def fetch_recent_accounts(account_id: str, db_id: str,
+                          window_days: int = 30) -> list[dict]:
+    ensure_accounts_table(account_id, db_id)
+    cutoff_ms = int((time.time() - window_days * 86400) * 1000)
+    sql = (
+        "SELECT email, password, full_name, age, created_at "
+        "FROM chatgpt_accounts WHERE created_at >= ? "
+        "ORDER BY created_at DESC"
+    )
+    res = d1_query_params(account_id, db_id, sql, [cutoff_ms])
+    return (res.get("result") or [{}])[0].get("results") or []
+
+
+def write_accounts_file(account_id: str, db_id: str, path: str,
+                        window_days: int = 30) -> int:
+    """Render the rolling account list to ``path``; returns row count."""
+    rows = fetch_recent_accounts(account_id, db_id, window_days=window_days)
+    header = (
+        f"# ChatGPT accounts created in the last {window_days} days "
+        f"(total: {len(rows)})\n"
+        "# format: email | password | full_name | age | created_at_iso\n"
+    )
+    lines = [header]
+    for r in rows:
+        ts_iso = time.strftime(
+            "%Y-%m-%d %H:%M:%SZ",
+            time.gmtime((r.get("created_at") or 0) / 1000),
+        )
+        lines.append(
+            f"{r.get('email','')} | {r.get('password','')} | "
+            f"{r.get('full_name','')} | {r.get('age','')} | {ts_iso}\n"
+        )
+    with open(path, "w") as f:
+        f.writelines(lines)
+    return len(rows)
+
+
 def poll_otp(account_id: str, db_id: str, alias_local: str, since_ts_ms: int,
              timeout_s: int = 180, interval_s: float = 1.5) -> str:
     deadline = time.time() + timeout_s
@@ -468,6 +549,15 @@ def main() -> int:
     with open(cookies_path, "w") as f:
         json.dump(cookies, f, indent=2)
 
+    # Persist + render rolling 30-day account list.
+    try:
+        record_account(account_id, db_id, result)
+        accounts_path = os.path.join(args.out_dir, "akun.txt")
+        write_accounts_file(account_id, db_id, accounts_path)
+    except Exception as e:
+        print(f"[accounts] failed to persist/render: {e}", file=sys.stderr)
+        accounts_path = None
+
     summary = (
         "\u2705 <b>Akun ChatGPT berhasil dibuat</b>\n"
         f"\nEmail: <code>{result['email']}</code>"
@@ -484,6 +574,11 @@ def main() -> int:
         bot_token, chat_id, cookies_path,
         caption=f"Cookies untuk {result['email']} (Cookie-Editor JSON)",
     )
+    if accounts_path and os.path.isfile(accounts_path):
+        telegram_send_document(
+            bot_token, chat_id, accounts_path,
+            caption="Akun ChatGPT (30 hari terakhir)",
+        )
 
     print(json.dumps({**result, "cookies_file": cookies_path,
                       "cookies_count": len(cookies)}, indent=2))

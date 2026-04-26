@@ -17,8 +17,12 @@ import { issueLoginToken } from "./auth.js";
 import { safeEqual } from "./utils.js";
 import {
   CHATGPT_HELP_TEXT,
+  CREATEGPT_HELP_TEXT,
+  CREATEGPT_MAX_BATCH,
   isValidAlias,
   parseChatgptArgs,
+  parseCreategptCount,
+  triggerChatgptBatch,
   triggerChatgptSignup
 } from "./chatgpt.js";
 
@@ -154,6 +158,7 @@ function helpText(domain, domains) {
     `/new hello@${domain} - buat alias di domain tertentu`,
     "/chatgpt - auto-signup akun ChatGPT (lewat GitHub Actions)",
     "/chatgpt aisha.putra - alias custom",
+    "/creategpt 5 - buat 5 akun ChatGPT sekaligus (max 10)",
     "/web - login dashboard",
     "/status - status runtime",
     "/whoami - tampilkan Telegram ID",
@@ -368,6 +373,41 @@ export async function handleTelegram(request, env) {
     await sendTelegram(env, replyChatId, `User ID: ${msg.from?.id}\nChat ID: ${msg.chat?.id}`, {
       reply_markup: mainMenuKeyboard()
     });
+  } else if (text.startsWith("/creategpt")) {
+    const body = text.replace(/^\/creategpt(?:@\S+)?/, "").trim();
+    if (!body || body === "help" || body === "-h" || body === "--help") {
+      await sendTelegram(env, replyChatId, CREATEGPT_HELP_TEXT);
+      return new Response("ok", { status: 200 });
+    }
+    const count = parseCreategptCount(body);
+    if (count === null) {
+      await sendTelegram(
+        env,
+        replyChatId,
+        `Jumlah tidak valid. Pakai angka 1\u2013${CREATEGPT_MAX_BATCH}, contoh: /creategpt 5`
+      );
+      return new Response("ok", { status: 200 });
+    }
+    await sendTelegram(
+      env,
+      replyChatId,
+      `\u23f3 Mulai membuat ${count} akun ChatGPT paralel (alias auto-generated)...`
+    );
+    const batch = await triggerChatgptBatch(env, replyChatId, count);
+    if (!batch.ok) {
+      const failedList = batch.failures.map((f) => `#${f.index}: ${f.error}`).join("\n");
+      await sendTelegram(
+        env,
+        replyChatId,
+        `\u26a0\ufe0f Hanya ${batch.dispatched}/${count} workflow ter-dispatch.\n${failedList}`
+      );
+      return new Response("ok", { status: 200 });
+    }
+    await sendTelegram(
+      env,
+      replyChatId,
+      `\ud83d\ude80 ${count} workflow ter-dispatch. Kredensial + cookies + akun.txt akan dikirim begitu tiap akun selesai (~30\u201360 detik per akun).`
+    );
   } else if (text.startsWith("/chatgpt")) {
     const body = text.replace(/^\/chatgpt(?:@\S+)?/, "").trim();
     if (body === "help" || body === "-h" || body === "--help") {
