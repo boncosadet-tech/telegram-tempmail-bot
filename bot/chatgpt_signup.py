@@ -426,7 +426,7 @@ def signup(args, account_id: str, db_id: str, domain: str) -> dict:
             page.route("**/*", _route_blocker)
             print("[fast] blocking image/media/font")
 
-        page.goto("https://chatgpt.com/auth/login")
+        page.goto("https://chatgpt.com/")
         wait_for_signup_button(page, total_ms=60000)
         try:
             page.get_by_role("button", name="Sign up for free").click(timeout=5000)

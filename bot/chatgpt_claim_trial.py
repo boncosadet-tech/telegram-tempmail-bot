@@ -237,7 +237,7 @@ def _wait_for_email_or_login_button(page: Page, total_ms: int = 60000) -> str:
 
 def chatgpt_login(page: Page, email: str, password: str) -> None:
     log(f"logging in as {email}")
-    page.goto("https://chatgpt.com/auth/login", wait_until="domcontentloaded")
+    page.goto("https://chatgpt.com/", wait_until="domcontentloaded")
     found = _wait_for_email_or_login_button(page, total_ms=60000)
     if found == "login":
         for role, name in (
