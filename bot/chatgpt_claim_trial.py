@@ -321,7 +321,7 @@ def switch_to_personal(page: Page) -> None:
     log("switching pricing to Personal tab (Plus card)")
     btn = page.locator('button[aria-label="Toggle for switching to Personal plans"]').first
     try:
-        btn.click(timeout=4000)
+        btn.click(timeout=4000, force=True)
     except PWTimeout:
         log("personal toggle click failed (probably already active)")
     page.wait_for_selector('button:has-text("Claim free offer")', timeout=10000)
@@ -348,7 +348,7 @@ def pick_indonesia_country(page: Page) -> None:
         log("country trigger not found (already Indonesia?)")
         return
     trigger.scroll_into_view_if_needed()
-    trigger.click(timeout=5000)
+    trigger.click(timeout=5000, force=True)
     page.wait_for_timeout(400)
     clicked = page.evaluate(
         """async () => {
