@@ -100,11 +100,11 @@ test("parseCreategptCount accepts valid range and rejects junk", () => {
   assert.equal(parseCreategptCount("3 extra"), 3);
 });
 
-test("triggerChatgptBatch dispatches N times when each succeeds", async () => {
-  let count = 0;
-  globalThis.fetch = async () => {
-    count += 1;
-    return new Response(null, { status: 204 });
+test("triggerChatgptBatch issues a single dispatch carrying count=N", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url, init });
+    return new Response("", { status: 200 });
   };
   try {
     const env = { GITHUB_PAT: "secret", GITHUB_REPO: "owner/repo" };
@@ -112,26 +112,26 @@ test("triggerChatgptBatch dispatches N times when each succeeds", async () => {
     assert.equal(result.ok, true);
     assert.equal(result.dispatched, 3);
     assert.equal(result.failures.length, 0);
-    assert.equal(count, 3);
+    assert.equal(calls.length, 1, "expected exactly one GitHub dispatch");
+    const body = JSON.parse(calls[0].init.body);
+    assert.equal(body.event_type, "chatgpt-signup");
+    assert.equal(body.client_payload.count, "3");
+    assert.equal(body.client_payload.chat_id, "42");
+    assert.equal(body.client_payload.alias, "");
   } finally {
     delete globalThis.fetch;
   }
 });
 
-test("triggerChatgptBatch reports per-call failure", async () => {
-  let i = 0;
-  globalThis.fetch = async () => {
-    i += 1;
-    if (i === 2) return new Response("forbidden", { status: 403 });
-    return new Response("", { status: 200 });
-  };
+test("triggerChatgptBatch reports dispatch failure", async () => {
+  globalThis.fetch = async () => new Response("forbidden", { status: 403 });
   try {
     const env = { GITHUB_PAT: "secret", GITHUB_REPO: "owner/repo" };
-    const result = await triggerChatgptBatch(env, 42, 3);
+    const result = await triggerChatgptBatch(env, 42, 5);
     assert.equal(result.ok, false);
-    assert.equal(result.dispatched, 2);
+    assert.equal(result.dispatched, 0);
     assert.equal(result.failures.length, 1);
-    assert.equal(result.failures[0].index, 2);
+    assert.match(result.failures[0].error, /403/);
   } finally {
     delete globalThis.fetch;
   }
