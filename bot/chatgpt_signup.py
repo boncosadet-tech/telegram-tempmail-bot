@@ -46,9 +46,9 @@ from patchright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
 
 # Defaults (overridable via env vars). Tied to a specific tempmail deployment.
-DEFAULT_CF_ACCOUNT = "c5eb18d9954d59aa35fe378cd27b42ab"
-DEFAULT_D1_DB = "4291198e-8702-4ce0-b11e-6fcf4768c28f"
-DEFAULT_DOMAIN = "areyoustudent.me"
+DEFAULT_CF_ACCOUNT = "3c4f8096a94b82c80fced2fccad04dcb"
+DEFAULT_D1_DB = "3cdf782b-c072-4078-ade6-23de7389653a"
+DEFAULT_DOMAIN = "dahus.my.id"
 
 
 WORDS_A = [
