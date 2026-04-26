@@ -89,6 +89,58 @@ export async function triggerChatgptSignup(env, chatId, args) {
   return { ok: false, error: `GitHub API ${resp.status}: ${detail}` };
 }
 
+/**
+ * Parse the body of `/creategpt N` into a positive integer between 1 and
+ * `max`. Returns `null` for missing / malformed / out-of-range values.
+ */
+export function parseCreategptCount(rawText, max = CREATEGPT_MAX_BATCH) {
+  const trimmed = (rawText || "").trim();
+  if (!trimmed) return null;
+  const m = trimmed.match(/^(\d{1,3})\b/);
+  if (!m) return null;
+  const n = Number(m[1]);
+  if (!Number.isFinite(n) || n < 1 || n > max) return null;
+  return n;
+}
+
+export const CREATEGPT_MAX_BATCH = 10;
+
+/**
+ * Trigger ``count`` independent GitHub Actions runs, each with an
+ * auto-generated alias. Returns ``{ok, dispatched, failures}``.
+ */
+export async function triggerChatgptBatch(env, chatId, count) {
+  const dispatched = [];
+  const failures = [];
+  for (let i = 0; i < count; i++) {
+    const r = await triggerChatgptSignup(env, chatId, {
+      mode: "pretty",
+      alias: "",
+      password: "",
+      full_name: "",
+      age: ""
+    });
+    if (r.ok) dispatched.push(i + 1);
+    else failures.push({ index: i + 1, error: r.error });
+  }
+  return {
+    ok: dispatched.length === count,
+    dispatched: dispatched.length,
+    failures
+  };
+}
+
+export const CREATEGPT_HELP_TEXT = [
+  `🤖 /creategpt N — buat N akun ChatGPT sekaligus (max ${CREATEGPT_MAX_BATCH}).`,
+  "",
+  "Contoh:",
+  "/creategpt 3 — dispatch 3 signup paralel",
+  "/creategpt 10 — dispatch 10 signup paralel (limit)",
+  "",
+  "Tiap akun selesai → bot kirim kredensial + cookies file +",
+  "akun.txt (rolling 30 hari) ke chat ini."
+].join("\n");
+
 export const CHATGPT_HELP_TEXT = [
   "🤖 /chatgpt — buat akun ChatGPT otomatis (lewat GitHub Actions runner).",
   "",

@@ -842,3 +842,104 @@ test("chatgpt command rejects invalid alias", async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+test("creategpt command dispatches N runs to GitHub Actions", async () => {
+  const env = createEnv(
+    {
+      userId: "6083649512",
+      chatId: "6083649512",
+      claimedAt: "2026-04-19T00:00:00.000Z",
+      domain: "example.com"
+    },
+    { GITHUB_PAT: "ghp_test", GITHUB_REPO: "owner/repo" }
+  );
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: url.toString(), init });
+    if (url.toString().includes("api.github.com")) {
+      return new Response(null, { status: 204 });
+    }
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
+  };
+
+  try {
+    const response = await worker.fetch(
+      new Request("https://worker.example/tg/secret-token", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "X-Telegram-Bot-Api-Secret-Token": "secret-token"
+        },
+        body: JSON.stringify(
+          createTelegramUpdate("/creategpt 3", {
+            userId: 6083649512,
+            chatId: 6083649512
+          })
+        )
+      }),
+      env
+    );
+    assert.equal(response.status, 200);
+    const ghCalls = calls.filter((c) => c.url.includes("api.github.com"));
+    assert.equal(ghCalls.length, 3, "expected 3 GitHub dispatches");
+    for (const c of ghCalls) {
+      const payload = JSON.parse(c.init.body);
+      assert.equal(payload.event_type, "chatgpt-signup");
+      assert.equal(payload.client_payload.alias, "");
+      assert.equal(payload.client_payload.chat_id, "6083649512");
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("creategpt command rejects out-of-range N", async () => {
+  const env = createEnv(
+    {
+      userId: "6083649512",
+      chatId: "6083649512",
+      claimedAt: "2026-04-19T00:00:00.000Z",
+      domain: "example.com"
+    },
+    { GITHUB_PAT: "ghp_test", GITHUB_REPO: "owner/repo" }
+  );
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: url.toString(), init });
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
+  };
+
+  try {
+    const response = await worker.fetch(
+      new Request("https://worker.example/tg/secret-token", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "X-Telegram-Bot-Api-Secret-Token": "secret-token"
+        },
+        body: JSON.stringify(
+          createTelegramUpdate("/creategpt 99", {
+            userId: 6083649512,
+            chatId: 6083649512
+          })
+        )
+      }),
+      env
+    );
+    assert.equal(response.status, 200);
+    const ghCalls = calls.filter((c) => c.url.includes("api.github.com"));
+    assert.equal(ghCalls.length, 0, "must not dispatch out-of-range N");
+    const tgCalls = calls.filter((c) => c.url.includes("api.telegram.org"));
+    assert.match(tgCalls[0].init.body, /Jumlah tidak valid/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

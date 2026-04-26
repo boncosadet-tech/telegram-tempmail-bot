@@ -3,8 +3,12 @@ import assert from "node:assert/strict";
 
 import {
   CHATGPT_HELP_TEXT,
+  CREATEGPT_HELP_TEXT,
+  CREATEGPT_MAX_BATCH,
   isValidAlias,
   parseChatgptArgs,
+  parseCreategptCount,
+  triggerChatgptBatch,
   triggerChatgptSignup
 } from "../src/worker/chatgpt.js";
 
@@ -83,4 +87,57 @@ test("triggerChatgptSignup fails fast without GITHUB_PAT", async () => {
 test("CHATGPT_HELP_TEXT mentions key examples", () => {
   assert.match(CHATGPT_HELP_TEXT, /\/chatgpt/);
   assert.match(CHATGPT_HELP_TEXT, /aisha\.putra/);
+});
+
+test("parseCreategptCount accepts valid range and rejects junk", () => {
+  assert.equal(parseCreategptCount("1"), 1);
+  assert.equal(parseCreategptCount("5"), 5);
+  assert.equal(parseCreategptCount(`${CREATEGPT_MAX_BATCH}`), CREATEGPT_MAX_BATCH);
+  assert.equal(parseCreategptCount(""), null);
+  assert.equal(parseCreategptCount("0"), null);
+  assert.equal(parseCreategptCount(`${CREATEGPT_MAX_BATCH + 1}`), null);
+  assert.equal(parseCreategptCount("abc"), null);
+  assert.equal(parseCreategptCount("3 extra"), 3);
+});
+
+test("triggerChatgptBatch dispatches N times when each succeeds", async () => {
+  let count = 0;
+  globalThis.fetch = async () => {
+    count += 1;
+    return new Response(null, { status: 204 });
+  };
+  try {
+    const env = { GITHUB_PAT: "secret", GITHUB_REPO: "owner/repo" };
+    const result = await triggerChatgptBatch(env, 42, 3);
+    assert.equal(result.ok, true);
+    assert.equal(result.dispatched, 3);
+    assert.equal(result.failures.length, 0);
+    assert.equal(count, 3);
+  } finally {
+    delete globalThis.fetch;
+  }
+});
+
+test("triggerChatgptBatch reports per-call failure", async () => {
+  let i = 0;
+  globalThis.fetch = async () => {
+    i += 1;
+    if (i === 2) return new Response("forbidden", { status: 403 });
+    return new Response("", { status: 200 });
+  };
+  try {
+    const env = { GITHUB_PAT: "secret", GITHUB_REPO: "owner/repo" };
+    const result = await triggerChatgptBatch(env, 42, 3);
+    assert.equal(result.ok, false);
+    assert.equal(result.dispatched, 2);
+    assert.equal(result.failures.length, 1);
+    assert.equal(result.failures[0].index, 2);
+  } finally {
+    delete globalThis.fetch;
+  }
+});
+
+test("CREATEGPT_HELP_TEXT mentions max batch and command", () => {
+  assert.match(CREATEGPT_HELP_TEXT, /\/creategpt/);
+  assert.match(CREATEGPT_HELP_TEXT, new RegExp(`max ${CREATEGPT_MAX_BATCH}`));
 });
