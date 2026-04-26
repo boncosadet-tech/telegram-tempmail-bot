@@ -135,22 +135,58 @@ class OtpTimeout(RuntimeError):
     pass
 
 
-def poll_otp_url(otp_url: str, otp_token: str, timeout_s: int = 300,
-                 interval_s: float = 2.0) -> str:
-    """Poll ``GET otp_url?token=otp_token`` until it returns 200 with a code.
-
-    Returns the OTP digits. Raises ``OtpTimeout`` after ``timeout_s`` seconds.
-    """
+def _otp_relay_request(otp_url: str, otp_token: str) -> tuple[int, str]:
+    """One-shot GET to the relay endpoint. Returns (status, payload)."""
     if not otp_url:
         raise RuntimeError("--otp-url required")
     if not otp_token:
         raise RuntimeError("--otp-token required")
     sep = "&" if "?" in otp_url else "?"
     url = f"{otp_url}{sep}token={urllib.parse.quote(otp_token, safe='')}"
+    return http_request("GET", url, {"User-Agent": "claim-trial"})
+
+
+def drain_pending_otp(otp_url: str, otp_token: str) -> str:
+    """Consume + discard any OTP currently stashed in KV from a previous run.
+
+    Without this, a stale `/otp` the user sent before the current claim run
+    started would be picked up immediately by ``poll_otp_url`` and typed
+    into Midtrans, where it would be rejected as invalid. Always call this
+    just before signaling the user that a fresh OTP is needed.
+
+    Returns the drained code (for logging) or empty string if nothing was
+    pending. Errors are swallowed — drain is best-effort.
+    """
+    try:
+        status, payload = _otp_relay_request(otp_url, otp_token)
+    except Exception as e:
+        log(f"otp drain error (non-fatal): {e}")
+        return ""
+    if status != 200:
+        return ""
+    try:
+        code = str(json.loads(payload).get("code") or "").strip()
+    except Exception:
+        return ""
+    if code:
+        masked = "*" * (len(code) - 2) + code[-2:] if len(code) > 2 else "*" * len(code)
+        log(f"drained stale OTP from previous run: {masked}")
+    return code
+
+
+def poll_otp_url(otp_url: str, otp_token: str, timeout_s: int = 300,
+                 interval_s: float = 2.0) -> str:
+    """Poll ``GET otp_url?token=otp_token`` until it returns 200 with a code.
+
+    Returns the OTP digits. Raises ``OtpTimeout`` after ``timeout_s`` seconds.
+
+    Caller is expected to call ``drain_pending_otp`` first so that a stale
+    code from a previous run does not get returned immediately.
+    """
     deadline = time.time() + timeout_s
     while time.time() < deadline:
         try:
-            status, payload = http_request("GET", url, {"User-Agent": "claim-trial"})
+            status, payload = _otp_relay_request(otp_url, otp_token)
             if status == 200:
                 data = json.loads(payload)
                 code = str(data.get("code") or "").strip()
@@ -564,6 +600,11 @@ def claim_trial(page: Page, email: str, password: str, full_name: str,
     submit_subscribe(page)
     midtrans_link_phone(page, phone)
     midtrans_confirm_hubungkan(page)
+
+    # Discard any stale `/otp` left behind by a previous claim run before
+    # we ask the user for a fresh code. Otherwise poll_otp_url would
+    # return the old digits instantly and Midtrans would reject them.
+    drain_pending_otp(otp_url, otp_token)
 
     telegram_send(
         bot_token,

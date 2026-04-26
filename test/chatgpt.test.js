@@ -154,6 +154,18 @@ test("parseClaimEmail rejects empty / malformed input", () => {
   assert.equal(parseClaimEmail(""), "");
   assert.equal(parseClaimEmail("not-an-email"), "");
   assert.equal(parseClaimEmail("two emails a@b.c d@e.f"), "");
+  // Regression: the loose `\S+@\S+\.\S+` regex used to accept these.
+  assert.equal(parseClaimEmail("<script>@evil.com"), "");
+  assert.equal(parseClaimEmail("a@b"), "");
+  assert.equal(parseClaimEmail("a@@b.c"), "");
+  assert.equal(parseClaimEmail("a@b..c"), "");
+  assert.equal(parseClaimEmail("a@b.c."), "");
+  assert.equal(parseClaimEmail("a@-b.c"), "");
+  assert.equal(parseClaimEmail("a@b-.c"), "");
+});
+
+test("parseClaimEmail accepts plus-tag and multi-label domains", () => {
+  assert.equal(parseClaimEmail("user+tag@sub.example.co.id"), "user+tag@sub.example.co.id");
 });
 
 test("triggerChatgptClaim dispatches chatgpt-claim with email + chat_id", async () => {

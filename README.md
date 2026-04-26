@@ -115,6 +115,14 @@ Itu saja. Termux/laptop boleh mati; semuanya jalan di Cloudflare.
 - Parsing email HTML → tampilan rapi, link aman (sanitasi XSS)
 - Command: `/start`, `/menu`, `/new`, `/web`, `/status`, `/help`
 
+**ChatGPT automation (lewat GitHub Actions runner)**
+
+- `/chatgpt` → signup 1 akun ChatGPT pakai alias dari domain kamu (OTP signup di-baca otomatis dari D1)
+- `/creategpt N` → fan-out signup N akun paralel (max 10) lewat workflow matrix
+- `/claim <email>` → claim free trial GoPay (Indonesia, charge Rp 1) untuk akun ChatGPT yang sudah ada
+- `/otp <6-digit>` → relay OTP WhatsApp dari GoPay ke script claim yang sedang menunggu (one-shot, TTL 5 menit)
+- Akun yang tidak punya promo "Try Plus free for 1 month" otomatis di-skip dengan exit code 2
+
 **Web dashboard private**
 
 - Login via link sekali-pakai dari bot (tidak ada form password di internet)
@@ -307,6 +315,91 @@ npx --package telegram-tempmail-bot telegram-tempmail-admin \
 | `src/worker/dashboard.js` | Template HTML login + dashboard premium (gradient design system) |
 
 Cloudflare Workers men-support **multi-module deploy** dalam satu script: `performSetup` memanggil `collectWorkerModules()` untuk mengumpulkan semua file di atas, lalu upload lewat `CloudflareClient.uploadWorkerScript(accountId, name, modules, options)` dengan FormData + metadata.
+
+### ChatGPT automation pipeline
+
+Tiga command bot (`/chatgpt`, `/creategpt`, `/claim`) men-trigger workflow GitHub Actions di repo ini, yang menjalankan Patchright (Playwright fork stealth) di runner Linux dengan Xvfb. Worker hanya berperan sebagai dispatcher + relay state; semua automasi browser jalan di runner GitHub.
+
+```
+                         ┌──────────────────┐
+                         │  Telegram chat   │
+                         │   (kamu/owner)   │
+                         └────────┬─────────┘
+                                  │
+                        /chatgpt  │  /claim <email>
+                        /creategpt│  /otp <code>
+                                  ▼
+                       ┌──────────────────────┐
+                       │ Cloudflare Worker    │
+                       │ src/worker/          │
+                       │ ├ telegram.js        │
+                       │ ├ chatgpt.js         │  ── repository_dispatch ──┐
+                       │ └ otp_relay.js       │                            │
+                       └─────────┬─────────┬──┘                            │
+                                 │         │                               │
+                       D1 lookup │         │ KV setPendingGopayOtp         │
+                       password  │         │ (gopay_otp:pending, TTL 5min) │
+                                 ▼         ▼                               │
+                          ┌──────────┐ ┌────────┐                          │
+                          │ MAIL_DB  │ │STATE_KV│                          │
+                          │  (D1)    │ │  (KV)  │                          │
+                          └──────────┘ └────────┘                          │
+                                          ▲                                ▼
+                                          │                  ┌──────────────────────┐
+                                          │ GET /relay/      │ GitHub Actions       │
+                                          │ gopay-otp        │ chatgpt-claim.yml    │
+                                          │ ?token=...       │ chatgpt-signup.yml   │
+                                          │ (consume+delete) │ (Patchright + Xvfb)  │
+                                          └──────────────────┤                      │
+                                                             └──────────┬───────────┘
+                                                                        │
+                                                                        ▼
+                                                              ┌──────────────────┐
+                                                              │  chatgpt.com /   │
+                                                              │  Stripe checkout │
+                                                              │  Midtrans GoPay  │
+                                                              └──────────────────┘
+```
+
+**`/claim <email>` flow (16 UI steps, ~2.5 menit di runner):**
+
+1. Worker validasi format email → POST `repository_dispatch(event_type=chatgpt-claim)` ke GitHub API
+2. Workflow `chatgpt-claim.yml` start → Python `bot/chatgpt_claim_trial.py` di-launch dengan Xvfb + Patchright Chromium
+3. Script ambil password dari D1 (`chatgpt_accounts` table, di-populate oleh `/chatgpt` signup)
+4. Login ke chatgpt.com (handle Cloudflare turnstile + auth0)
+5. Buka pricing modal → Personal tab → pilih Indonesia (virtual scroll dropdown via JS poll) → Plus card flip ke `Rp349000 → Rp0`
+6. Klik "Claim free offer" → redirect Stripe checkout (`cs_live_*`)
+7. Isi Stripe Address Element (Full name, Country, Address, City, Province, Postal) di iframe `elements-inner-address-*`
+8. Klik Subscribe → redirect `app.midtrans.com/snap/v4/redirection/<uuid>#/gopay-tokenization/linking`
+9. Input phone +62 → klik "Link and pay" → tunggu iframe GoPay → klik "Hubungkan"
+10. **Drain stale OTP dari KV** (cegah race condition) → kirim Telegram: `📲 OTP WhatsApp dibutuhkan`
+11. Polling `GET /relay/gopay-otp?token=$GOPAY_OTP_TOKEN` setiap 2 detik
+12. Owner balas `/otp 123456` → Worker simpan ke `STATE_KV[gopay_otp:pending]` (TTL 5 menit)
+13. Script terima 200 OK + code → input ke iframe Midtrans (auto-submit di 6 digit)
+14. PIN linking #1 → "Pay now" → konfirmasi "Bayar Rp 1" iframe → PIN payment #2
+15. Tunggu redirect `chatgpt.com/payments/success?...&plan_type=plus`
+16. Telegram: `✅ Plus aktif: <email> · Charge: Rp 1 · Durasi: Xs`
+
+**Properti penting:**
+- KV key `gopay_otp:pending` adalah **single global slot** — tidak bisa run dua `/claim` paralel (tidak masalah karena flow membutuhkan input manual user untuk OTP)
+- Endpoint `/relay/gopay-otp` mengkonsumsi (return + delete) dalam satu request → OTP one-shot, tidak bisa di-replay
+- Token shared `GOPAY_OTP_TOKEN` di Worker secret + GitHub Actions repo secret (rotate keduanya bersamaan)
+- Akun tanpa promo (yang lihat modal "Upgrade your plan" reguler) di-skip otomatis dengan exit code 2 → Telegram: `⏭️ Skipped: <email> tidak punya free offer`
+
+**Secret yang dibutuhkan untuk fitur claim:**
+
+| Lokasi | Nama | Fungsi |
+| --- | --- | --- |
+| Worker secret | `GOPAY_OTP_TOKEN` | Bearer token endpoint relay |
+| Worker secret | `GITHUB_PAT` | Trigger `repository_dispatch` |
+| Worker var | `GITHUB_REPO` | Owner/repo target dispatch (default: `moahaassy-design/telegram-tempmail-bot`) |
+| GH repo secret | `GOPAY_OTP_TOKEN` | Sama dengan worker, dipakai script |
+| GH repo secret | `OTP_RELAY_URL` | URL endpoint relay (`https://<worker>.workers.dev/relay/gopay-otp`) |
+| GH repo secret | `GOPAY_PHONE` | Nomor +62 tanpa 0/+62 (e.g. `85951756709`) |
+| GH repo secret | `GOPAY_PIN` | 6-digit PIN GoPay |
+| GH repo secret | `CLOUDFLARE_GLOBAL_API` | Lookup password dari D1 |
+| GH repo secret | `CLOUDFLARE_EMAIL` | Header X-Auth-Email |
+| GH repo secret | `TOKEN_BOT_TELEGRAM` | Kirim progress ke Telegram |
 
 ---
 

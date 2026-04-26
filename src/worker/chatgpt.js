@@ -146,12 +146,20 @@ export const CREATEGPT_HELP_TEXT = [
 /**
  * Parse `email` from the body of `/claim <email>`. Returns the lowercased
  * email or empty string if the body is empty / malformed.
+ *
+ * The regex matches the conservative subset of RFC 5322 that the rest of
+ * the project uses: ASCII local-part with the usual punctuation set, then
+ * a domain with one or more labels separated by dots. This keeps junk like
+ * `<>@<>.<>`, embedded whitespace, multiple `@`, or trailing punctuation
+ * out of the dispatch payload.
  */
 export function parseClaimEmail(rawText) {
   const trimmed = (rawText || "").trim();
   if (!trimmed) return "";
-  const m = trimmed.match(/^(\S+@\S+\.\S+)$/);
-  return m ? m[1].toLowerCase() : "";
+  const m = trimmed.match(
+    /^([a-z0-9._+-]{1,64})@([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+)$/i
+  );
+  return m ? `${m[1]}@${m[2]}`.toLowerCase() : "";
 }
 
 /**
