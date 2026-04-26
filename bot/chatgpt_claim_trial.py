@@ -78,6 +78,15 @@ from chatgpt_signup import (  # noqa: E402  (sibling import after path tweak)
     telegram_send,
 )
 
+EMAIL_SELECTOR = (
+    'input[type="email"], input[name="email"], '
+    'input[name="username"], input[autocomplete="username"]'
+)
+PASSWORD_SELECTOR = (
+    'input[type="password"], input[name="password"], '
+    'input[autocomplete="current-password"]'
+)
+
 DEFAULT_PROVINCE = "DKI"  # typeahead match for "DKI Jakarta — Jakarta"
 DEFAULT_ADDRESS = "Jl. Sudirman Kav. 1"
 DEFAULT_CITY = "Jakarta"
@@ -161,29 +170,73 @@ def poll_otp_url(otp_url: str, otp_token: str, timeout_s: int = 300,
 # ---------------------------------------------------------------------------
 
 
+def _wait_for_email_or_login_button(page: Page, total_ms: int = 60000) -> str:
+    """Drive the chatgpt.com landing page until either the email input is
+    visible (auth0 form already loaded) or the "Log in" button is clickable
+    (we still need to navigate). Cloudflare turnstile is auto-clicked when
+    it appears. Returns "email" or "login" indicating which we found.
+    """
+    deadline = time.time() + total_ms / 1000
+    while time.time() < deadline:
+        if page.locator(EMAIL_SELECTOR).first.is_visible():
+            return "email"
+        for role, name in (
+            ("button", "Log in"),
+            ("link", "Log in"),
+            ("button", "Sign in"),
+            ("link", "Sign in"),
+        ):
+            try:
+                page.get_by_role(role, name=name, exact=True).first.wait_for(
+                    state="visible", timeout=1500
+                )
+                return "login"
+            except PWTimeout:
+                continue
+        if cf_turnstile_clickbox(page, timeout_ms=4000):
+            continue
+        page.wait_for_timeout(1500)
+    raise PWTimeout(f"login UI did not render within {total_ms}ms")
+
+
 def chatgpt_login(page: Page, email: str, password: str) -> None:
     log(f"logging in as {email}")
     page.goto("https://chatgpt.com/auth/login", wait_until="domcontentloaded")
-    # First "Log in" button on landing page (some accounts skip straight to
-    # the Auth0 form; both cases are handled).
-    try:
-        page.get_by_role("button", name="Log in").first.click(timeout=8000)
-    except PWTimeout:
-        pass
-    cf_turnstile_clickbox(page, timeout_ms=8000)
+    found = _wait_for_email_or_login_button(page, total_ms=60000)
+    if found == "login":
+        for role, name in (
+            ("button", "Log in"),
+            ("link", "Log in"),
+            ("button", "Sign in"),
+            ("link", "Sign in"),
+        ):
+            try:
+                page.get_by_role(role, name=name, exact=True).first.click(timeout=4000)
+                break
+            except PWTimeout:
+                continue
+        # Auth0 sometimes shows another turnstile after navigating.
+        cf_turnstile_clickbox(page, timeout_ms=8000)
 
-    email_input = page.locator('input[type="email"], input[name="email"]').first
-    email_input.wait_for(state="visible", timeout=30000)
+    email_input = page.locator(EMAIL_SELECTOR).first
+    email_input.wait_for(state="visible", timeout=45000)
     email_input.fill(email)
-    page.get_by_role("button", name="Continue").first.click(timeout=10000)
+    page.get_by_role("button", name="Continue", exact=True).first.click(timeout=10000)
+    cf_turnstile_clickbox(page, timeout_ms=6000)
 
-    pw_input = page.locator('input[type="password"], input[name="password"]').first
-    pw_input.wait_for(state="visible", timeout=30000)
+    pw_input = page.locator(PASSWORD_SELECTOR).first
+    pw_input.wait_for(state="visible", timeout=45000)
     pw_input.fill(password)
-    page.get_by_role("button", name="Continue").first.click(timeout=10000)
+    page.get_by_role("button", name="Continue", exact=True).first.click(timeout=10000)
 
-    # Land on chatgpt.com (post-login).
-    page.wait_for_url("**/chatgpt.com/**", timeout=60000)
+    # Land on chatgpt.com (post-login). Some accounts hit a "verify
+    # device" page first; surface that explicitly so we don't sit forever.
+    try:
+        page.wait_for_url("**/chatgpt.com/**", timeout=60000)
+    except PWTimeout:
+        if "/u/mfa" in page.url or "/verify" in page.url:
+            raise RuntimeError(f"login requires MFA/verification: {page.url}")
+        raise
     page.wait_for_load_state("domcontentloaded")
     log("login complete")
 
