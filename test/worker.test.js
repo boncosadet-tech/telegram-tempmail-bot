@@ -736,3 +736,109 @@ test("email handler stores html-like rendered content for dashboard view", async
     globalThis.fetch = originalFetch;
   }
 });
+
+test("chatgpt command dispatches to GitHub Actions and acks user", async () => {
+  const env = createEnv(
+    {
+      userId: "6083649512",
+      chatId: "6083649512",
+      claimedAt: "2026-04-19T00:00:00.000Z",
+      domain: "example.com"
+    },
+    { GITHUB_PAT: "ghp_test", GITHUB_REPO: "owner/repo" }
+  );
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: url.toString(), init });
+    if (url.toString().includes("api.github.com")) {
+      return new Response(null, { status: 204 });
+    }
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
+  };
+
+  try {
+    const response = await worker.fetch(
+      new Request("https://worker.example/tg/secret-token", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "X-Telegram-Bot-Api-Secret-Token": "secret-token"
+        },
+        body: JSON.stringify(
+          createTelegramUpdate("/chatgpt aisha.putra", {
+            userId: 6083649512,
+            chatId: 6083649512
+          })
+        )
+      }),
+      env
+    );
+    assert.equal(response.status, 200);
+    const ghCall = calls.find((c) => c.url.includes("api.github.com"));
+    assert.ok(ghCall, "expected a GitHub dispatch call");
+    assert.equal(ghCall.init.method, "POST");
+    assert.match(ghCall.url, /\/repos\/owner\/repo\/dispatches$/);
+    const payload = JSON.parse(ghCall.init.body);
+    assert.equal(payload.event_type, "chatgpt-signup");
+    assert.equal(payload.client_payload.alias, "aisha.putra");
+    assert.equal(payload.client_payload.chat_id, "6083649512");
+
+    const tgCalls = calls.filter((c) => c.url.includes("api.telegram.org"));
+    const ack = tgCalls.find((c) => /Memulai signup ChatGPT/.test(c.init.body));
+    assert.ok(ack, "expected ack message to user");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("chatgpt command rejects invalid alias", async () => {
+  const env = createEnv(
+    {
+      userId: "6083649512",
+      chatId: "6083649512",
+      claimedAt: "2026-04-19T00:00:00.000Z",
+      domain: "example.com"
+    },
+    { GITHUB_PAT: "ghp_test", GITHUB_REPO: "owner/repo" }
+  );
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: url.toString(), init });
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
+  };
+
+  try {
+    const response = await worker.fetch(
+      new Request("https://worker.example/tg/secret-token", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "X-Telegram-Bot-Api-Secret-Token": "secret-token"
+        },
+        body: JSON.stringify(
+          createTelegramUpdate("/chatgpt bad@alias!", {
+            userId: 6083649512,
+            chatId: 6083649512
+          })
+        )
+      }),
+      env
+    );
+    assert.equal(response.status, 200);
+    const ghCall = calls.find((c) => c.url.includes("api.github.com"));
+    assert.equal(ghCall, undefined, "must not dispatch on invalid alias");
+    const tgCalls = calls.filter((c) => c.url.includes("api.telegram.org"));
+    assert.ok(tgCalls.length >= 1);
+    assert.match(tgCalls[0].init.body, /alias|invalid/i);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
