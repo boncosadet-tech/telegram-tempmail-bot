@@ -60,6 +60,7 @@ export async function triggerChatgptSignup(env, chatId, args) {
       password: args.password || "",
       full_name: args.full_name || "",
       age: args.age || "",
+      count: String(args.count || 1),
       chat_id: String(chatId)
     }
   };
@@ -106,27 +107,27 @@ export function parseCreategptCount(rawText, max = CREATEGPT_MAX_BATCH) {
 export const CREATEGPT_MAX_BATCH = 10;
 
 /**
- * Trigger ``count`` independent GitHub Actions runs, each with an
- * auto-generated alias. Returns ``{ok, dispatched, failures}``.
+ * Trigger a single GitHub Actions workflow run that fans out to ``count``
+ * matrix jobs, each producing one ChatGPT account. The workflow's
+ * ``prepare`` job translates ``count`` into a ``[1..count]`` matrix array,
+ * and ``signup`` runs in parallel. Returns ``{ok, dispatched, failures}``.
  */
 export async function triggerChatgptBatch(env, chatId, count) {
-  const dispatched = [];
-  const failures = [];
-  for (let i = 0; i < count; i++) {
-    const r = await triggerChatgptSignup(env, chatId, {
-      mode: "pretty",
-      alias: "",
-      password: "",
-      full_name: "",
-      age: ""
-    });
-    if (r.ok) dispatched.push(i + 1);
-    else failures.push({ index: i + 1, error: r.error });
+  const r = await triggerChatgptSignup(env, chatId, {
+    mode: "pretty",
+    alias: "",
+    password: "",
+    full_name: "",
+    age: "",
+    count
+  });
+  if (r.ok) {
+    return { ok: true, dispatched: count, failures: [] };
   }
   return {
-    ok: dispatched.length === count,
-    dispatched: dispatched.length,
-    failures
+    ok: false,
+    dispatched: 0,
+    failures: [{ index: 0, error: r.error }]
   };
 }
 

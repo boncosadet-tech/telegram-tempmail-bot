@@ -885,13 +885,12 @@ test("creategpt command dispatches N runs to GitHub Actions", async () => {
     );
     assert.equal(response.status, 200);
     const ghCalls = calls.filter((c) => c.url.includes("api.github.com"));
-    assert.equal(ghCalls.length, 3, "expected 3 GitHub dispatches");
-    for (const c of ghCalls) {
-      const payload = JSON.parse(c.init.body);
-      assert.equal(payload.event_type, "chatgpt-signup");
-      assert.equal(payload.client_payload.alias, "");
-      assert.equal(payload.client_payload.chat_id, "6083649512");
-    }
+    assert.equal(ghCalls.length, 1, "expected one GitHub dispatch carrying count=3");
+    const payload = JSON.parse(ghCalls[0].init.body);
+    assert.equal(payload.event_type, "chatgpt-signup");
+    assert.equal(payload.client_payload.count, "3");
+    assert.equal(payload.client_payload.alias, "");
+    assert.equal(payload.client_payload.chat_id, "6083649512");
   } finally {
     globalThis.fetch = originalFetch;
   }
