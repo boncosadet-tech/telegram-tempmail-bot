@@ -24,7 +24,6 @@ CLI flags (all optional):
   --full-name <name>           custom full name
   --age <int>                  age (default: 25)
   --otp-timeout <int>          seconds to wait for OTP (default: 180)
-  --no-stealth                 disable tf-playwright-stealth
   --no-fast                    disable resource blocking
 """
 
@@ -38,13 +37,12 @@ import sys
 import time
 import urllib.request
 
-from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
-
-try:
-    from playwright_stealth import stealth_sync
-    _STEALTH_OK = True
-except ImportError:
-    _STEALTH_OK = False
+# patchright is a maintained fork of playwright that ships pre-applied
+# CDP-detection patches (the same approach as rebrowser-playwright). It is
+# noticeably more reliable than tf-playwright-stealth at clearing the
+# Cloudflare “Just a moment…” challenge from a fresh runner IP, especially
+# when paired with a real headed Chromium under Xvfb.
+from patchright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
 
 # Defaults (overridable via env vars). Tied to a specific tempmail deployment.
@@ -183,18 +181,42 @@ def d1_query(account_id: str, db_id: str, sql: str) -> dict:
     return json.loads(payload)
 
 
+def d1_query_params(account_id: str, db_id: str, sql: str, params: list) -> dict:
+    """Same as d1_query but uses the D1 ``params`` field for safe binding."""
+    api_key = os.environ["CLOUDFLARE_GLOBAL_API"]
+    cf_email = os.environ["CLOUDFLARE_EMAIL"]
+    url = (
+        f"https://api.cloudflare.com/client/v4/accounts/{account_id}"
+        f"/d1/database/{db_id}/query"
+    )
+    body = json.dumps({"sql": sql, "params": params}).encode()
+    status, payload = http_request(
+        "POST", url,
+        {
+            "X-Auth-Email": cf_email,
+            "X-Auth-Key": api_key,
+            "Content-Type": "application/json",
+        },
+        body,
+    )
+    if status >= 400:
+        raise RuntimeError(f"D1 query HTTP {status}: {payload.decode()[:200]}")
+    return json.loads(payload)
+
+
 def poll_otp(account_id: str, db_id: str, alias_local: str, since_ts_ms: int,
              timeout_s: int = 180, interval_s: float = 1.5) -> str:
     deadline = time.time() + timeout_s
     sql = (
         "SELECT otp_code, sender, subject, received_at FROM messages "
-        f"WHERE alias_local='{alias_local}' AND received_at > {since_ts_ms} "
+        "WHERE alias_local = ? AND received_at > ? "
         "AND sender LIKE '%openai%' "
         "ORDER BY received_at DESC LIMIT 1"
     )
     while time.time() < deadline:
         try:
-            res = d1_query(account_id, db_id, sql)
+            res = d1_query_params(account_id, db_id, sql,
+                                  [alias_local, since_ts_ms])
             rows = (res.get("result") or [{}])[0].get("results") or []
             if rows and rows[0].get("otp_code") and rows[0]["otp_code"] != "-":
                 otp = rows[0]["otp_code"].strip()
@@ -309,32 +331,21 @@ def signup(args, account_id: str, db_id: str, domain: str) -> dict:
     print(f"[signup] email={email}  password={password}  name={args.full_name}")
 
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(
-            headless=True,
-            args=["--disable-blink-features=AutomationControlled"],
-        )
+        # patchright + headed Chromium under Xvfb is the combination that
+        # reliably clears Cloudflare's "Just a moment…" challenge from a fresh
+        # GitHub Actions runner IP. headless=True is detected and stalls.
+        browser = pw.chromium.launch(headless=False)
         context = browser.new_context(
             viewport={"width": 1366, "height": 768},
-            user_agent=(
-                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-            ),
             locale="en-US",
         )
         page = context.new_page()
-
-        if args.stealth and _STEALTH_OK:
-            try:
-                stealth_sync(page)
-                print("[stealth] applied")
-            except Exception as e:
-                print(f"[stealth] failed: {e}")
 
         if args.fast:
             page.route("**/*", _route_blocker)
             print("[fast] blocking image/media/font")
 
-        page.goto("https://chatgpt.com/auth/login", wait_until="domcontentloaded")
+        page.goto("https://chatgpt.com/auth/login")
         wait_for_signup_button(page, total_ms=60000)
         try:
             page.get_by_role("button", name="Sign up for free").click(timeout=5000)
@@ -411,8 +422,6 @@ def main() -> int:
     p.add_argument("--full-name", default=None)
     p.add_argument("--age", type=int, default=25)
     p.add_argument("--otp-timeout", type=int, default=180)
-    p.add_argument("--stealth", dest="stealth", action="store_true", default=True)
-    p.add_argument("--no-stealth", dest="stealth", action="store_false")
     p.add_argument("--fast", dest="fast", action="store_true", default=True)
     p.add_argument("--no-fast", dest="fast", action="store_false")
     p.add_argument("--out-dir", default="./out", help="Where to write the cookies file")
@@ -444,8 +453,12 @@ def main() -> int:
     try:
         result = signup(args, account_id, db_id, domain)
     except Exception as e:
-        msg = f"\u274c Signup gagal: <code>{type(e).__name__}: {e}</code>"
-        print(msg, file=sys.stderr)
+        # Telegram sendMessage uses parse_mode=HTML; escape the exception text
+        # so messages like "<Locator selector=...>" don't break the parser.
+        escaped = (str(e).replace("&", "&amp;")
+                   .replace("<", "&lt;").replace(">", "&gt;"))
+        msg = f"\u274c Signup gagal: <code>{type(e).__name__}: {escaped}</code>"
+        print(f"Signup gagal: {type(e).__name__}: {e}", file=sys.stderr)
         telegram_send(bot_token, chat_id, msg)
         return 1
 

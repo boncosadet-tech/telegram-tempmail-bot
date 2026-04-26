@@ -72,36 +72,33 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r bot/requirements.txt
 
-      - name: Install Playwright Chromium
-        run: python -m playwright install --with-deps chromium
+      - name: Install Chromium + Xvfb
+        run: |
+          python -m patchright install --with-deps chromium
+          sudo apt-get install -y --no-install-recommends xvfb
 
-      - name: Resolve signup parameters
-        id: params
+      - name: Run signup
         env:
+          # User-controlled values are forwarded as env vars (NOT interpolated
+          # into the shell script) so that shell metacharacters in alias /
+          # password / full_name cannot break out of the argument and execute
+          # arbitrary commands. Python receives them via os.environ + argv.
+          PYTHONUNBUFFERED: "1"
           INPUT_MODE: ${{ github.event.client_payload.mode || inputs.mode }}
           INPUT_ALIAS: ${{ github.event.client_payload.alias || inputs.alias }}
           INPUT_PASSWORD: ${{ github.event.client_payload.password || inputs.password }}
           INPUT_FULL_NAME: ${{ github.event.client_payload.full_name || inputs.full_name }}
           INPUT_AGE: ${{ github.event.client_payload.age || inputs.age }}
         run: |
-          {
-            echo "mode=${INPUT_MODE:-pretty}"
-            echo "alias=${INPUT_ALIAS}"
-            echo "password=${INPUT_PASSWORD}"
-            echo "full_name=${INPUT_FULL_NAME}"
-            echo "age=${INPUT_AGE:-25}"
-          } >>"$GITHUB_OUTPUT"
-
-      - name: Run signup
-        run: |
           set -e
-          ARGS=(--mode "${{ steps.params.outputs.mode }}")
-          [ -n "${{ steps.params.outputs.alias }}" ] && ARGS+=(--alias "${{ steps.params.outputs.alias }}")
-          [ -n "${{ steps.params.outputs.password }}" ] && ARGS+=(--password "${{ steps.params.outputs.password }}")
-          [ -n "${{ steps.params.outputs.full_name }}" ] && ARGS+=(--full-name "${{ steps.params.outputs.full_name }}")
-          [ -n "${{ steps.params.outputs.age }}" ] && ARGS+=(--age "${{ steps.params.outputs.age }}")
+          ARGS=(--mode "${INPUT_MODE:-pretty}")
+          [ -n "$INPUT_ALIAS" ] && ARGS+=(--alias "$INPUT_ALIAS")
+          [ -n "$INPUT_PASSWORD" ] && ARGS+=(--password "$INPUT_PASSWORD")
+          [ -n "$INPUT_FULL_NAME" ] && ARGS+=(--full-name "$INPUT_FULL_NAME")
+          [ -n "$INPUT_AGE" ] && ARGS+=(--age "$INPUT_AGE")
           ARGS+=(--out-dir "./out")
-          python bot/chatgpt_signup.py "${ARGS[@]}"
+          xvfb-run --auto-servernum --server-args='-screen 0 1366x768x24' \
+            python bot/chatgpt_signup.py "${ARGS[@]}"
 
       - name: Upload cookies artifact
         if: always()
