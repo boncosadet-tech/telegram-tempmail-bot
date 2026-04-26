@@ -22,3 +22,4 @@ apps/mobile/android/app/*.keystore
 # Flutter-only artifacts from local builds
 apps/mobile/android/app/src/main/java/
 apps/mobile/pubspec.lock
+__pycache__/

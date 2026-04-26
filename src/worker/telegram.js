@@ -17,14 +17,18 @@ import { issueLoginToken } from "./auth.js";
 import { safeEqual } from "./utils.js";
 import {
   CHATGPT_HELP_TEXT,
+  CLAIM_HELP_TEXT,
   CREATEGPT_HELP_TEXT,
   CREATEGPT_MAX_BATCH,
   isValidAlias,
   parseChatgptArgs,
+  parseClaimEmail,
   parseCreategptCount,
   triggerChatgptBatch,
+  triggerChatgptClaim,
   triggerChatgptSignup
 } from "./chatgpt.js";
+import { maskOtp, parseOtpArg, setPendingGopayOtp } from "./otp_relay.js";
 
 const TELEGRAM_API_ROOT = "https://api.telegram.org";
 
@@ -159,6 +163,8 @@ function helpText(domain, domains) {
     "/chatgpt - auto-signup akun ChatGPT (lewat GitHub Actions)",
     "/chatgpt aisha.putra - alias custom",
     "/creategpt 5 - buat 5 akun ChatGPT sekaligus (max 10)",
+    "/claim <email> - claim free trial GoPay untuk 1 akun",
+    "/otp 123456 - relay OTP GoPay ke claim-trial worker",
     "/web - login dashboard",
     "/status - status runtime",
     "/whoami - tampilkan Telegram ID",
@@ -436,6 +442,52 @@ export async function handleTelegram(request, env) {
       env,
       replyChatId,
       `🚀 Workflow di-trigger di ${dispatch.repo}. Kredensial + cookies akan dikirim ~30 detik lagi.`
+    );
+  } else if (text.startsWith("/claim")) {
+    const body = text.replace(/^\/claim(?:@\S+)?/, "").trim();
+    if (!body || body === "help" || body === "-h" || body === "--help") {
+      await sendTelegram(env, replyChatId, CLAIM_HELP_TEXT);
+      return new Response("ok", { status: 200 });
+    }
+    const email = parseClaimEmail(body);
+    if (!email) {
+      await sendTelegram(
+        env,
+        replyChatId,
+        "Format: /claim <email>\nContoh: /claim adit.brooks@areyoustudent.me"
+      );
+      return new Response("ok", { status: 200 });
+    }
+    await sendTelegram(env, replyChatId, `⏳ Memulai claim trial untuk ${email}`);
+    const dispatch = await triggerChatgptClaim(env, replyChatId, email);
+    if (!dispatch.ok) {
+      await sendTelegram(env, replyChatId, `❌ Gagal trigger workflow: ${dispatch.error}`);
+      return new Response("ok", { status: 200 });
+    }
+    await sendTelegram(
+      env,
+      replyChatId,
+      `🚀 Workflow di-trigger di ${dispatch.repo}. Tunggu prompt OTP via WhatsApp lalu balas dengan /otp 123456.`
+    );
+  } else if (text.startsWith("/otp")) {
+    if (!env.GOPAY_OTP_TOKEN) {
+      await sendTelegram(
+        env,
+        replyChatId,
+        "OTP relay belum dikonfigurasi. Set secret GOPAY_OTP_TOKEN di worker."
+      );
+      return new Response("ok", { status: 200 });
+    }
+    const code = parseOtpArg(text);
+    if (!code) {
+      await sendTelegram(env, replyChatId, "Format: /otp 123456 (4–8 digit angka).");
+      return new Response("ok", { status: 200 });
+    }
+    await setPendingGopayOtp(env, code);
+    await sendTelegram(
+      env,
+      replyChatId,
+      `✅ OTP ${maskOtp(code)} disimpan. Akan dikonsumsi script dalam 5 menit.`
     );
   } else if (text.startsWith("/help") || !text) {
     await sendTelegram(env, replyChatId, helpText(domain, domains), {

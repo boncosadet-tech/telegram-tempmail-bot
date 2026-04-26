@@ -3,12 +3,15 @@ import assert from "node:assert/strict";
 
 import {
   CHATGPT_HELP_TEXT,
+  CLAIM_HELP_TEXT,
   CREATEGPT_HELP_TEXT,
   CREATEGPT_MAX_BATCH,
   isValidAlias,
   parseChatgptArgs,
+  parseClaimEmail,
   parseCreategptCount,
   triggerChatgptBatch,
+  triggerChatgptClaim,
   triggerChatgptSignup
 } from "../src/worker/chatgpt.js";
 
@@ -140,4 +143,47 @@ test("triggerChatgptBatch reports dispatch failure", async () => {
 test("CREATEGPT_HELP_TEXT mentions max batch and command", () => {
   assert.match(CREATEGPT_HELP_TEXT, /\/creategpt/);
   assert.match(CREATEGPT_HELP_TEXT, new RegExp(`max ${CREATEGPT_MAX_BATCH}`));
+});
+
+test("parseClaimEmail accepts a single email and lowercases it", () => {
+  assert.equal(parseClaimEmail("adit.brooks@areyoustudent.me"), "adit.brooks@areyoustudent.me");
+  assert.equal(parseClaimEmail("ETHAN.BENNETT@AREYOUSTUDENT.ME"), "ethan.bennett@areyoustudent.me");
+});
+
+test("parseClaimEmail rejects empty / malformed input", () => {
+  assert.equal(parseClaimEmail(""), "");
+  assert.equal(parseClaimEmail("not-an-email"), "");
+  assert.equal(parseClaimEmail("two emails a@b.c d@e.f"), "");
+});
+
+test("triggerChatgptClaim dispatches chatgpt-claim with email + chat_id", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url, init });
+    return new Response("", { status: 200 });
+  };
+  try {
+    const env = { GITHUB_PAT: "secret", GITHUB_REPO: "owner/repo" };
+    const result = await triggerChatgptClaim(env, 1234, "adit.brooks@areyoustudent.me");
+    assert.equal(result.ok, true);
+    assert.equal(calls.length, 1);
+    assert.match(calls[0].url, /repos\/owner\/repo\/dispatches/);
+    const body = JSON.parse(calls[0].init.body);
+    assert.equal(body.event_type, "chatgpt-claim");
+    assert.equal(body.client_payload.email, "adit.brooks@areyoustudent.me");
+    assert.equal(body.client_payload.chat_id, "1234");
+  } finally {
+    delete globalThis.fetch;
+  }
+});
+
+test("triggerChatgptClaim fails fast without GITHUB_PAT", async () => {
+  const result = await triggerChatgptClaim({}, 1, "x@y.z");
+  assert.equal(result.ok, false);
+  assert.match(result.error, /GITHUB_PAT/);
+});
+
+test("CLAIM_HELP_TEXT mentions /claim and OTP relay", () => {
+  assert.match(CLAIM_HELP_TEXT, /\/claim/);
+  assert.match(CLAIM_HELP_TEXT, /otp/i);
 });

@@ -4,6 +4,7 @@
 
 const DEFAULT_REPO = "moahaassy-design/telegram-tempmail-bot";
 const DEFAULT_EVENT_TYPE = "chatgpt-signup";
+const CLAIM_EVENT_TYPE = "chatgpt-claim";
 
 /** Lightweight argv parser for the `/chatgpt` command body. */
 export function parseChatgptArgs(rawText) {
@@ -140,6 +141,73 @@ export const CREATEGPT_HELP_TEXT = [
   "",
   "Tiap akun selesai → bot kirim kredensial + cookies file +",
   "akun.txt (rolling 30 hari) ke chat ini."
+].join("\n");
+
+/**
+ * Parse `email` from the body of `/claim <email>`. Returns the lowercased
+ * email or empty string if the body is empty / malformed.
+ */
+export function parseClaimEmail(rawText) {
+  const trimmed = (rawText || "").trim();
+  if (!trimmed) return "";
+  const m = trimmed.match(/^(\S+@\S+\.\S+)$/);
+  return m ? m[1].toLowerCase() : "";
+}
+
+/**
+ * Trigger the `chatgpt-claim` workflow for a single account. The workflow
+ * looks up the password from D1 (chatgpt_accounts) so we only pass the
+ * email + chat_id to the runner.
+ */
+export async function triggerChatgptClaim(env, chatId, email) {
+  const pat = env.GITHUB_PAT;
+  const repo = env.GITHUB_REPO || DEFAULT_REPO;
+  if (!pat) {
+    return { ok: false, error: "GITHUB_PAT secret is not set on the worker." };
+  }
+
+  const url = `https://api.github.com/repos/${repo}/dispatches`;
+  const body = {
+    event_type: CLAIM_EVENT_TYPE,
+    client_payload: {
+      email,
+      chat_id: String(chatId)
+    }
+  };
+
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${pat}`,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      "Content-Type": "application/json",
+      "User-Agent": "telegram-tempmail-bot"
+    },
+    body: JSON.stringify(body)
+  });
+
+  if (resp.status >= 200 && resp.status < 300) {
+    return { ok: true, repo };
+  }
+
+  let detail = "";
+  try {
+    detail = (await resp.text()).slice(0, 300);
+  } catch {
+    /* ignore */
+  }
+  return { ok: false, error: `GitHub API ${resp.status}: ${detail}` };
+}
+
+export const CLAIM_HELP_TEXT = [
+  "🎁 /claim <email> — claim free trial GoPay untuk 1 akun.",
+  "",
+  "Contoh:",
+  "/claim adit.brooks@areyoustudent.me",
+  "",
+  "Setelah trigger, bot akan minta OTP WhatsApp via /otp 123456.",
+  "Akun yang gak punya free offer otomatis di-skip."
 ].join("\n");
 
 export const CHATGPT_HELP_TEXT = [
