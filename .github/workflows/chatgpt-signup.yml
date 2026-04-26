@@ -1,0 +1,113 @@
+name: ChatGPT signup
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Alias style"
+        required: false
+        default: "pretty"
+        type: choice
+        options:
+          - pretty
+          - short
+          - random
+      alias:
+        description: "Custom alias (overrides mode)"
+        required: false
+        default: ""
+      password:
+        description: "Custom password"
+        required: false
+        default: ""
+      full_name:
+        description: "Custom full name"
+        required: false
+        default: ""
+      age:
+        description: "Age (>= 18)"
+        required: false
+        default: "25"
+      chat_id:
+        description: "Telegram chat id to send the result to"
+        required: false
+        default: ""
+
+  repository_dispatch:
+    types:
+      - chatgpt-signup
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chatgpt-signup-${{ github.event.client_payload.alias || inputs.alias || 'auto' }}
+  cancel-in-progress: false
+
+jobs:
+  signup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      CLOUDFLARE_GLOBAL_API: ${{ secrets.CLOUDFLARE_GLOBAL_API }}
+      CLOUDFLARE_EMAIL: ${{ secrets.CLOUDFLARE_EMAIL }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TOKEN_BOT_TELEGRAM }}
+      # Picked from either repository_dispatch payload or workflow_dispatch input.
+      OWNER_CHAT_ID: ${{ github.event.client_payload.chat_id || inputs.chat_id }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: bot/requirements.txt
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r bot/requirements.txt
+
+      - name: Install Playwright Chromium
+        run: python -m playwright install --with-deps chromium
+
+      - name: Resolve signup parameters
+        id: params
+        env:
+          INPUT_MODE: ${{ github.event.client_payload.mode || inputs.mode }}
+          INPUT_ALIAS: ${{ github.event.client_payload.alias || inputs.alias }}
+          INPUT_PASSWORD: ${{ github.event.client_payload.password || inputs.password }}
+          INPUT_FULL_NAME: ${{ github.event.client_payload.full_name || inputs.full_name }}
+          INPUT_AGE: ${{ github.event.client_payload.age || inputs.age }}
+        run: |
+          {
+            echo "mode=${INPUT_MODE:-pretty}"
+            echo "alias=${INPUT_ALIAS}"
+            echo "password=${INPUT_PASSWORD}"
+            echo "full_name=${INPUT_FULL_NAME}"
+            echo "age=${INPUT_AGE:-25}"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Run signup
+        run: |
+          set -e
+          ARGS=(--mode "${{ steps.params.outputs.mode }}")
+          [ -n "${{ steps.params.outputs.alias }}" ] && ARGS+=(--alias "${{ steps.params.outputs.alias }}")
+          [ -n "${{ steps.params.outputs.password }}" ] && ARGS+=(--password "${{ steps.params.outputs.password }}")
+          [ -n "${{ steps.params.outputs.full_name }}" ] && ARGS+=(--full-name "${{ steps.params.outputs.full_name }}")
+          [ -n "${{ steps.params.outputs.age }}" ] && ARGS+=(--age "${{ steps.params.outputs.age }}")
+          ARGS+=(--out-dir "./out")
+          python bot/chatgpt_signup.py "${ARGS[@]}"
+
+      - name: Upload cookies artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chatgpt-cookies
+          path: out/*.json
+          if-no-files-found: ignore
+          retention-days: 7

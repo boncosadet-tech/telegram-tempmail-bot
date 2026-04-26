@@ -1,0 +1,2 @@
+playwright>=1.41,<2
+tf-playwright-stealth>=1.2

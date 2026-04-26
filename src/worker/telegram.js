@@ -15,6 +15,12 @@ import {
 import { hasMailDb, upsertAlias } from "./db.js";
 import { issueLoginToken } from "./auth.js";
 import { safeEqual } from "./utils.js";
+import {
+  CHATGPT_HELP_TEXT,
+  isValidAlias,
+  parseChatgptArgs,
+  triggerChatgptSignup
+} from "./chatgpt.js";
 
 const TELEGRAM_API_ROOT = "https://api.telegram.org";
 
@@ -146,6 +152,8 @@ function helpText(domain, domains) {
     "/new - buat alias readable",
     "/new hello - buat alias custom",
     `/new hello@${domain} - buat alias di domain tertentu`,
+    "/chatgpt - auto-signup akun ChatGPT (lewat GitHub Actions)",
+    "/chatgpt aisha.putra - alias custom",
     "/web - login dashboard",
     "/status - status runtime",
     "/whoami - tampilkan Telegram ID",
@@ -360,6 +368,35 @@ export async function handleTelegram(request, env) {
     await sendTelegram(env, replyChatId, `User ID: ${msg.from?.id}\nChat ID: ${msg.chat?.id}`, {
       reply_markup: mainMenuKeyboard()
     });
+  } else if (text.startsWith("/chatgpt")) {
+    const body = text.replace(/^\/chatgpt(?:@\S+)?/, "").trim();
+    if (body === "help" || body === "-h" || body === "--help") {
+      await sendTelegram(env, replyChatId, CHATGPT_HELP_TEXT);
+      return new Response("ok", { status: 200 });
+    }
+    const args = parseChatgptArgs(body);
+    if (!isValidAlias(args.alias)) {
+      await sendTelegram(
+        env,
+        replyChatId,
+        "Alias tidak valid. Hanya huruf, angka, titik, dash, underscore."
+      );
+      return new Response("ok", { status: 200 });
+    }
+    const ack = args.alias
+      ? `⏳ Memulai signup ChatGPT untuk alias: ${args.alias}@${domain}`
+      : `⏳ Memulai signup ChatGPT (mode: ${args.mode}, alias auto-generated)`;
+    await sendTelegram(env, replyChatId, ack);
+    const dispatch = await triggerChatgptSignup(env, replyChatId, args);
+    if (!dispatch.ok) {
+      await sendTelegram(env, replyChatId, `❌ Gagal trigger workflow: ${dispatch.error}`);
+      return new Response("ok", { status: 200 });
+    }
+    await sendTelegram(
+      env,
+      replyChatId,
+      `🚀 Workflow di-trigger di ${dispatch.repo}. Kredensial + cookies akan dikirim ~30 detik lagi.`
+    );
   } else if (text.startsWith("/help") || !text) {
     await sendTelegram(env, replyChatId, helpText(domain, domains), {
       reply_markup: helpKeyboard()
