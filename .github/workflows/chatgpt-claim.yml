@@ -82,6 +82,7 @@ jobs:
           GOPAY_PIN: ${{ secrets.GOPAY_PIN }}
           OTP_RELAY_URL: ${{ secrets.OTP_RELAY_URL }}
           GOPAY_OTP_TOKEN: ${{ secrets.GOPAY_OTP_TOKEN }}
+          DEBUG_ARTIFACTS_DIR: ${{ github.workspace }}/debug-artifacts
         run: |
           set -e
           if [ -z "$INPUT_EMAIL" ]; then echo "::error::email is required"; exit 1; fi
@@ -97,3 +98,12 @@ jobs:
               --otp-url "$OTP_RELAY_URL" \
               --otp-token "$GOPAY_OTP_TOKEN" \
               --otp-timeout 300
+
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: claim-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ github.workspace }}/debug-artifacts/
+          retention-days: 7
+          if-no-files-found: ignore

@@ -50,15 +50,20 @@ CLI:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
+import re
 import sys
 import time
 import urllib.parse
 import urllib.request
+from collections.abc import Iterator
 
 from patchright.sync_api import (
+    Error as PWError,
     FrameLocator,
+    Locator,
     Page,
     TimeoutError as PWTimeout,
     sync_playwright,
@@ -70,7 +75,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from chatgpt_signup import (  # noqa: E402  (sibling import after path tweak)
     DEFAULT_CF_ACCOUNT,
     DEFAULT_D1_DB,
-    DEFAULT_DOMAIN,
     cf_turnstile_clickbox,
     d1_query_params,
     ensure_accounts_table,
@@ -92,9 +96,202 @@ DEFAULT_ADDRESS = "Jl. Sudirman Kav. 1"
 DEFAULT_CITY = "Jakarta"
 DEFAULT_POSTAL = "10220"
 
+# ---------------------------------------------------------------------------
+# Timeouts (ms unless noted) — centralised for easy tuning
+# ---------------------------------------------------------------------------
+LOGIN_PAGE_TOTAL_MS = 60_000
+EMAIL_INPUT_TIMEOUT_MS = 45_000
+POST_LOGIN_NAV_TIMEOUT_MS = 60_000
+CONTINUE_BUTTON_TIMEOUT_MS = 10_000
+TURNSTILE_DEFAULT_TIMEOUT_MS = 6_000
+TURNSTILE_LOGIN_TIMEOUT_MS = 8_000
+TURNSTILE_LANDING_TIMEOUT_MS = 4_000
+LOGIN_ENTRY_PROBE_TIMEOUT_MS = 1_500
+LOGIN_ENTRY_CLICK_TIMEOUT_MS = 4_000
+
+ONBOARDING_DIALOG_PROBE_MS = 5_000
+ONBOARDING_CLICK_TIMEOUT_MS = 4_000
+# chatgpt.com's interest-picker has up to 3 pages on a fresh account
+# (onboarding_interest_picker_max_depth). Loop budget = 5 to be safe.
+ONBOARDING_MAX_STEPS = 5
+
+PRICING_MODAL_TIMEOUT_MS = 8_000
+PRICING_MODAL_CLICK_TIMEOUT_MS = 4_000
+PERSONAL_TOGGLE_CLICK_TIMEOUT_MS = 4_000
+CLAIM_FREE_OFFER_TIMEOUT_MS = 10_000
+CLAIM_FREE_OFFER_NAV_TIMEOUT_MS = 45_000
+COUNTRY_TRIGGER_TIMEOUT_MS = 5_000
+COUNTRY_PRICING_SETTLE_MS = 2_000
+
+STRIPE_NAME_INPUT_TIMEOUT_MS = 20_000
+STRIPE_PROVINCE_TIMEOUT_MS = 5_000
+STRIPE_SUBSCRIBE_CLICK_TIMEOUT_MS = 10_000
+MIDTRANS_NAV_TIMEOUT_MS = 60_000
+
+GOPAY_LINKING_NAV_TIMEOUT_MS = 30_000
+GOPAY_PHONE_INPUT_TIMEOUT_MS = 15_000
+GOPAY_LINK_PAY_TIMEOUT_MS = 10_000
+GOPAY_HUBUNGKAN_PROBE_TIMEOUT_MS = 2_000
+GOPAY_OTP_PROMPT_TIMEOUT_MS = 30_000
+GOPAY_PIN_PROMPT_TIMEOUT_MS = 30_000
+GOPAY_PAY_NAV_TIMEOUT_MS = 30_000
+GOPAY_PAY_CLICK_TIMEOUT_MS = 10_000
+GOPAY_BAYAR_TIMEOUT_MS = 20_000
+SUCCESS_REDIRECT_TIMEOUT_MS = 60_000
+
+# Iframe-discovery polling: 30 attempts × 500 ms = 15 s effective.
+IFRAME_POLL_ITERATIONS = 30
+IFRAME_POLL_INTERVAL_MS = 500
+
+DEFAULT_TYPE_DELAY_MS = 80
+PHONE_TYPE_DELAY_MS = 40
+
+# Where per-step failure artifacts (PNG screenshot + HTML snapshot + .txt
+# context) are written. Honours the env var so the workflow can override.
+DEBUG_ARTIFACTS_DIR = os.environ.get("DEBUG_ARTIFACTS_DIR", "debug-artifacts")
+FAILURE_SCREENSHOT_TIMEOUT_MS = 10_000
+
+# Login entry-point fallbacks (probed in order on the chatgpt.com landing
+# page). Both the wait-for-loaded helper and the click helper share this
+# list so they stay in sync.
+LOGIN_ENTRY_ROLES: tuple[tuple[str, str], ...] = (
+    ("button", "Log in"),
+    ("link", "Log in"),
+    ("button", "Sign in"),
+    ("link", "Sign in"),
+)
+
 
 def log(msg: str) -> None:
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+
+
+def _mask_secret(s: str) -> str:
+    """Mask all but the last 2 chars of an OTP/PIN-like secret for logging."""
+    if not s:
+        return ""
+    if len(s) <= 2:
+        return "*" * len(s)
+    return "*" * (len(s) - 2) + s[-2:]
+
+
+def _escape_html(text: str) -> str:
+    """Escape ``<``/``>``/``&`` for safe inclusion in Telegram HTML messages."""
+    return (
+        text.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+
+
+def _press_text(loc: Locator, text: str, delay: int = DEFAULT_TYPE_DELAY_MS) -> None:
+    """Type ``text`` into ``loc`` one keypress at a time.
+
+    Prefers ``Locator.press_sequentially`` (Playwright >= 1.38) and falls
+    back to the deprecated ``Locator.type`` if the runtime is older. The
+    delay between keystrokes mimics human typing — many of the GoPay /
+    Midtrans inputs auto-submit on full input and dislike paste-style fills.
+    """
+    press_seq = getattr(loc, "press_sequentially", None)
+    if callable(press_seq):
+        press_seq(text, delay=delay)
+    else:  # pragma: no cover — defensive fallback for older patchright
+        loc.type(text, delay=delay)
+
+
+def _capture_failure(
+    page: Page | None,
+    step: str,
+    exc: BaseException,
+    out_dir: str = DEBUG_ARTIFACTS_DIR,
+) -> list[str]:
+    """Persist a debug bundle for a failed claim step.
+
+    Writes up to three files into ``out_dir`` (created on demand):
+
+    - ``<HHMMSS>_<step>.txt`` — step name, exception, current URL/title.
+    - ``<HHMMSS>_<step>.png`` — full-page screenshot at moment of failure.
+    - ``<HHMMSS>_<step>.html`` — rendered HTML snapshot (selector debug).
+
+    The PNG and HTML are best-effort: if the page is already closed or the
+    screenshot itself times out, we still emit the .txt so the artifact
+    bundle is never empty. Returns the list of paths actually written.
+    """
+    try:
+        os.makedirs(out_dir, exist_ok=True)
+    except OSError as e:
+        log(f"failure capture: cannot mkdir {out_dir}: {e}")
+        return []
+
+    safe_step = re.sub(r"[^a-zA-Z0-9_-]+", "_", step)[:40] or "unknown"
+    base = f"{time.strftime('%H%M%S')}_{safe_step}"
+    paths: list[str] = []
+
+    info_lines = [
+        f"step: {step}",
+        f"exception: {type(exc).__name__}: {exc}",
+        f"timestamp: {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}",
+    ]
+    if page is not None:
+        try:
+            info_lines.append(f"url: {page.url}")
+        except Exception as e:
+            info_lines.append(f"url: <unreadable: {e}>")
+        try:
+            info_lines.append(f"title: {page.title()}")
+        except Exception as e:
+            info_lines.append(f"title: <unreadable: {e}>")
+    info_path = os.path.join(out_dir, f"{base}.txt")
+    try:
+        with open(info_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(info_lines) + "\n")
+        paths.append(info_path)
+    except OSError as e:
+        log(f"failure capture: cannot write {info_path}: {e}")
+
+    if page is None:
+        return paths
+
+    png_path = os.path.join(out_dir, f"{base}.png")
+    try:
+        page.screenshot(
+            path=png_path,
+            full_page=True,
+            timeout=FAILURE_SCREENSHOT_TIMEOUT_MS,
+        )
+        paths.append(png_path)
+    except (PWError, PWTimeout, OSError) as e:
+        log(f"failure capture: screenshot failed: {e}")
+
+    html_path = os.path.join(out_dir, f"{base}.html")
+    try:
+        with open(html_path, "w", encoding="utf-8") as f:
+            f.write(page.content())
+        paths.append(html_path)
+    except (PWError, PWTimeout, OSError) as e:
+        log(f"failure capture: html dump failed: {e}")
+
+    log(f"captured failure artifacts ({len(paths)}): " + ", ".join(
+        os.path.basename(p) for p in paths
+    ))
+    return paths
+
+
+@contextlib.contextmanager
+def _step(
+    name: str,
+    page: Page | None,
+    out_dir: str = DEBUG_ARTIFACTS_DIR,
+) -> Iterator[None]:
+    """Wrap one logical claim step. On exception, capture a debug bundle
+    via :func:`_capture_failure` then re-raise unchanged."""
+    log(f"▶ step: {name}")
+    try:
+        yield
+    except BaseException as exc:
+        if not isinstance(exc, KeyboardInterrupt):
+            _capture_failure(page, name, exc, out_dir)
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -117,9 +314,14 @@ def lookup_account_password(account_id: str, db_id: str, email: str) -> str:
 
 
 def derive_full_name_from_email(email: str) -> str:
+    """Best-effort billing full-name from the local-part of an email.
+
+    Splits on common separators (``.``, ``-``, ``_``, ``+``) so Gmail-style
+    aliases like ``john.doe+chatgpt@…`` collapse cleanly to ``John Doe``.
+    """
     local = email.split("@", 1)[0]
-    cleaned = local.replace(".", " ").replace("-", " ").replace("_", " ")
-    parts = ["".join(c for c in w if c.isalpha()) for w in cleaned.split()]
+    raw_parts = re.split(r"[._\-+]+", local)
+    parts = ["".join(c for c in w if c.isalpha()) for w in raw_parts]
     parts = [w for w in parts if w]
     if not parts:
         return "User"
@@ -169,8 +371,7 @@ def drain_pending_otp(otp_url: str, otp_token: str) -> str:
     except Exception:
         return ""
     if code:
-        masked = "*" * (len(code) - 2) + code[-2:] if len(code) > 2 else "*" * len(code)
-        log(f"drained stale OTP from previous run: {masked}")
+        log(f"drained stale OTP from previous run: {_mask_secret(code)}")
     return code
 
 
@@ -191,7 +392,7 @@ def poll_otp_url(otp_url: str, otp_token: str, timeout_s: int = 300,
                 data = json.loads(payload)
                 code = str(data.get("code") or "").strip()
                 if code.isdigit() and 4 <= len(code) <= 8:
-                    log(f"OTP received via relay: {'*' * (len(code) - 2)}{code[-2:]}")
+                    log(f"OTP received via relay: {_mask_secret(code)}")
                     return code
             elif status not in (404, 401):
                 log(f"otp relay HTTP {status}: {payload[:120]!r}")
@@ -206,7 +407,9 @@ def poll_otp_url(otp_url: str, otp_token: str, timeout_s: int = 300,
 # ---------------------------------------------------------------------------
 
 
-def _wait_for_email_or_login_button(page: Page, total_ms: int = 60000) -> str:
+def _wait_for_email_or_login_button(
+    page: Page, total_ms: int = LOGIN_PAGE_TOTAL_MS
+) -> str:
     """Drive the chatgpt.com landing page until either the email input is
     visible (auth0 form already loaded) or the "Log in" button is clickable
     (we still need to navigate). Cloudflare turnstile is auto-clicked when
@@ -214,38 +417,33 @@ def _wait_for_email_or_login_button(page: Page, total_ms: int = 60000) -> str:
     """
     deadline = time.time() + total_ms / 1000
     while time.time() < deadline:
+        # Auto-clear any Turnstile challenge first — on cold loads the
+        # widget renders before either the auth form or the Log-in CTA,
+        # so doing this up-front shaves a full poll iteration of waiting.
+        if cf_turnstile_clickbox(page, timeout_ms=TURNSTILE_LANDING_TIMEOUT_MS):
+            continue
         if page.locator(EMAIL_SELECTOR).first.is_visible():
             return "email"
-        for role, name in (
-            ("button", "Log in"),
-            ("link", "Log in"),
-            ("button", "Sign in"),
-            ("link", "Sign in"),
-        ):
+        for role, name in LOGIN_ENTRY_ROLES:
             try:
                 page.get_by_role(role, name=name, exact=True).first.wait_for(
-                    state="visible", timeout=1500
+                    state="visible", timeout=LOGIN_ENTRY_PROBE_TIMEOUT_MS
                 )
                 return "login"
             except PWTimeout:
                 continue
-        if cf_turnstile_clickbox(page, timeout_ms=4000):
-            continue
-        page.wait_for_timeout(1500)
+        page.wait_for_timeout(LOGIN_ENTRY_PROBE_TIMEOUT_MS)
     raise PWTimeout(f"login UI did not render within {total_ms}ms")
 
 
 def _click_login_entry(page: Page) -> bool:
     """Click whichever 'Log in' / 'Sign in' entry point is currently visible
     on the chatgpt.com landing page. Returns True if a click landed."""
-    for role, name in (
-        ("button", "Log in"),
-        ("link", "Log in"),
-        ("button", "Sign in"),
-        ("link", "Sign in"),
-    ):
+    for role, name in LOGIN_ENTRY_ROLES:
         try:
-            page.get_by_role(role, name=name, exact=True).first.click(timeout=4000)
+            page.get_by_role(role, name=name, exact=True).first.click(
+                timeout=LOGIN_ENTRY_CLICK_TIMEOUT_MS
+            )
             return True
         except PWTimeout:
             continue
@@ -255,11 +453,11 @@ def _click_login_entry(page: Page) -> bool:
 def chatgpt_login(page: Page, email: str, password: str) -> None:
     log(f"logging in as {email}")
     page.goto("https://chatgpt.com/", wait_until="domcontentloaded")
-    found = _wait_for_email_or_login_button(page, total_ms=60000)
+    found = _wait_for_email_or_login_button(page, total_ms=LOGIN_PAGE_TOTAL_MS)
     if found == "login":
         _click_login_entry(page)
         # Auth0 sometimes shows another turnstile after navigating.
-        cf_turnstile_clickbox(page, timeout_ms=8000)
+        cf_turnstile_clickbox(page, timeout_ms=TURNSTILE_LOGIN_TIMEOUT_MS)
 
     # The email input sometimes refuses to render on cold launches even
     # after the Log-in entry is clicked — typically a slow /auth/login
@@ -268,33 +466,39 @@ def chatgpt_login(page: Page, email: str, password: str) -> None:
     # 45s timeout that burns a whole GitHub Actions run.
     email_input = page.locator(EMAIL_SELECTOR).first
     try:
-        email_input.wait_for(state="visible", timeout=45000)
+        email_input.wait_for(state="visible", timeout=EMAIL_INPUT_TIMEOUT_MS)
     except PWTimeout:
         log("email input did not render — reloading and retrying once")
         page.reload(wait_until="domcontentloaded")
-        cf_turnstile_clickbox(page, timeout_ms=8000)
+        cf_turnstile_clickbox(page, timeout_ms=TURNSTILE_LOGIN_TIMEOUT_MS)
         # If the landing page still shows the Log-in entry, click it
         # again; otherwise the email input should already be mounted.
         if not page.locator(EMAIL_SELECTOR).first.is_visible():
             _click_login_entry(page)
-            cf_turnstile_clickbox(page, timeout_ms=8000)
-        email_input.wait_for(state="visible", timeout=45000)
+            cf_turnstile_clickbox(page, timeout_ms=TURNSTILE_LOGIN_TIMEOUT_MS)
+        email_input.wait_for(state="visible", timeout=EMAIL_INPUT_TIMEOUT_MS)
     email_input.fill(email)
-    page.get_by_role("button", name="Continue", exact=True).first.click(timeout=10000)
-    cf_turnstile_clickbox(page, timeout_ms=6000)
+    page.get_by_role("button", name="Continue", exact=True).first.click(
+        timeout=CONTINUE_BUTTON_TIMEOUT_MS
+    )
+    cf_turnstile_clickbox(page, timeout_ms=TURNSTILE_DEFAULT_TIMEOUT_MS)
 
     pw_input = page.locator(PASSWORD_SELECTOR).first
-    pw_input.wait_for(state="visible", timeout=45000)
+    pw_input.wait_for(state="visible", timeout=EMAIL_INPUT_TIMEOUT_MS)
     pw_input.fill(password)
-    page.get_by_role("button", name="Continue", exact=True).first.click(timeout=10000)
+    page.get_by_role("button", name="Continue", exact=True).first.click(
+        timeout=CONTINUE_BUTTON_TIMEOUT_MS
+    )
 
     # Land on chatgpt.com (post-login). Some accounts hit a "verify
     # device" page first; surface that explicitly so we don't sit forever.
     try:
-        page.wait_for_url("**/chatgpt.com/**", timeout=60000)
-    except PWTimeout:
+        page.wait_for_url("**/chatgpt.com/**", timeout=POST_LOGIN_NAV_TIMEOUT_MS)
+    except PWTimeout as e:
         if "/u/mfa" in page.url or "/verify" in page.url:
-            raise RuntimeError(f"login requires MFA/verification: {page.url}")
+            raise RuntimeError(
+                f"login requires MFA/verification: {page.url}"
+            ) from e
         raise
     page.wait_for_load_state("domcontentloaded")
     log("login complete")
@@ -309,23 +513,82 @@ class NoPromoOffer(RuntimeError):
     """Raised when the account does not qualify for the free trial promo."""
 
 
+def dismiss_chatgpt_onboarding(page: Page) -> None:
+    """Skip post-login "What brings you to ChatGPT?" interest-picker.
+
+    Brand-new accounts hit a modal ``<dialog>`` immediately after auth that
+    blocks every other UI surface (sidebar, pricing modal, profile menu).
+    The picker can be up to 3 pages deep on chatgpt.com, so we loop
+    clicking the dialog's "Skip" button — with a one-shot "Next" fallback
+    if Skip is somehow non-interactive — until the dialog is gone.
+
+    No-op for already-onboarded accounts: if no modal dialog appears within
+    :data:`ONBOARDING_DIALOG_PROBE_MS` we return immediately.
+    """
+    onboarding_dialog = page.locator(
+        'dialog[aria-modal="true"][open]:has(button:has-text("Skip"))'
+    ).first
+    for step in range(1, ONBOARDING_MAX_STEPS + 1):
+        try:
+            onboarding_dialog.wait_for(
+                state="visible", timeout=ONBOARDING_DIALOG_PROBE_MS
+            )
+        except PWTimeout:
+            if step == 1:
+                log("no onboarding dialog detected (already onboarded)")
+            else:
+                log(f"onboarding dismissed after {step - 1} step(s)")
+            return
+        skip_btn = onboarding_dialog.get_by_role(
+            "button", name="Skip", exact=True
+        ).first
+        try:
+            skip_btn.click(timeout=ONBOARDING_CLICK_TIMEOUT_MS)
+            log(f"clicked Skip on onboarding (step {step})")
+            continue
+        except PWTimeout:
+            log(f"Skip not clickable on step {step}; trying Next fallback")
+        next_btn = onboarding_dialog.get_by_role(
+            "button", name="Next", exact=True
+        ).first
+        try:
+            # Pick the first available option so Next becomes enabled.
+            onboarding_dialog.locator('button[aria-pressed="false"]').first.click(
+                timeout=ONBOARDING_CLICK_TIMEOUT_MS
+            )
+            next_btn.click(timeout=ONBOARDING_CLICK_TIMEOUT_MS)
+            log(f"clicked option + Next as fallback (step {step})")
+        except PWTimeout as e:
+            log(f"both Skip and Next failed on onboarding step {step}: {e}")
+            raise
+    log(
+        f"onboarding loop hit ONBOARDING_MAX_STEPS={ONBOARDING_MAX_STEPS}; "
+        "continuing in case the dialog has just closed."
+    )
+
+
 def open_pricing_modal(page: Page) -> None:
     log("opening pricing modal")
     if "chatgpt.com" not in page.url:
         page.goto("https://chatgpt.com/")
     page.wait_for_load_state("domcontentloaded")
     try:
-        page.get_by_role("button", name="Claim offer").first.click(timeout=4000)
+        page.get_by_role("button", name="Claim offer").first.click(
+            timeout=PRICING_MODAL_CLICK_TIMEOUT_MS
+        )
     except PWTimeout:
         try:
-            page.get_by_role("button", name="Free offer").first.click(timeout=4000)
+            page.get_by_role("button", name="Free offer").first.click(
+                timeout=PRICING_MODAL_CLICK_TIMEOUT_MS
+            )
         except PWTimeout:
             page.goto("https://chatgpt.com/?promo_campaign=team-1-month-free#pricing")
     try:
         page.wait_for_selector(
-            'text=/Try (Plus|Business) free for 1 month/', timeout=8000
+            'text=/Try (Plus|Business) free for 1 month/',
+            timeout=PRICING_MODAL_TIMEOUT_MS,
         )
-    except PWTimeout:
+    except PWTimeout as e:
         if (
             page.locator('h2:has-text("Upgrade your plan")').count() > 0
             or page.locator('button:has-text("Upgrade to Plus")').count() > 0
@@ -333,21 +596,27 @@ def open_pricing_modal(page: Page) -> None:
             raise NoPromoOffer(
                 "Account is not eligible for the free trial promo "
                 "(saw regular 'Upgrade your plan' modal)."
-            )
+            ) from e
         page.wait_for_selector(
-            'text=/Try (Plus|Business) free for 1 month/', timeout=8000
+            'text=/Try (Plus|Business) free for 1 month/',
+            timeout=PRICING_MODAL_TIMEOUT_MS,
         )
     log(f"pricing modal open at {page.url}")
 
 
 def switch_to_personal(page: Page) -> None:
     log("switching pricing to Personal tab (Plus card)")
-    btn = page.locator('button[aria-label="Toggle for switching to Personal plans"]').first
+    btn = page.locator(
+        'button[aria-label="Toggle for switching to Personal plans"]'
+    ).first
     try:
-        btn.click(timeout=4000, force=True)
+        btn.click(timeout=PERSONAL_TOGGLE_CLICK_TIMEOUT_MS, force=True)
     except PWTimeout:
         log("personal toggle click failed (probably already active)")
-    page.wait_for_selector('button:has-text("Claim free offer")', timeout=10000)
+    page.wait_for_selector(
+        'button:has-text("Claim free offer")',
+        timeout=CLAIM_FREE_OFFER_TIMEOUT_MS,
+    )
 
 
 def pick_indonesia_country(page: Page) -> None:
@@ -371,7 +640,7 @@ def pick_indonesia_country(page: Page) -> None:
         log("country trigger not found (already Indonesia?)")
         return
     trigger.scroll_into_view_if_needed()
-    trigger.click(timeout=5000, force=True)
+    trigger.click(timeout=COUNTRY_TRIGGER_TIMEOUT_MS, force=True)
     page.wait_for_timeout(400)
     clicked = page.evaluate(
         """async () => {
@@ -415,8 +684,10 @@ def pick_indonesia_country(page: Page) -> None:
     }"""
     )
     if clicked != "ok":
-        raise RuntimeError(f"Indonesia option not found in country dropdown ({clicked})")
-    page.wait_for_timeout(2000)
+        raise RuntimeError(
+            f"Indonesia option not found in country dropdown ({clicked})"
+        )
+    page.wait_for_timeout(COUNTRY_PRICING_SETTLE_MS)
     body = page.evaluate("() => document.body.innerText")
     if "IDR" not in body and "Rp" not in body:
         raise RuntimeError("pricing did not switch to IDR")
@@ -425,8 +696,13 @@ def pick_indonesia_country(page: Page) -> None:
 
 def claim_free_offer(page: Page) -> None:
     log("clicking 'Claim free offer' on Plus card")
-    page.locator('button:has-text("Claim free offer")').first.click(timeout=10000)
-    page.wait_for_url("**/checkout/openai_llc/cs_live_*", timeout=45000)
+    page.locator('button:has-text("Claim free offer")').first.click(
+        timeout=CLAIM_FREE_OFFER_TIMEOUT_MS
+    )
+    page.wait_for_url(
+        "**/checkout/openai_llc/cs_live_*",
+        timeout=CLAIM_FREE_OFFER_NAV_TIMEOUT_MS,
+    )
     log(f"checkout open: {page.url[:100]}…")
 
 
@@ -439,7 +715,7 @@ def stripe_address_frame(page: Page) -> FrameLocator:
     return page.frame_locator('iframe[src*="elements-inner-address"]').first
 
 
-def _addr_input(addr: FrameLocator, *names: str):
+def _addr_input(addr: FrameLocator, *names: str) -> Locator:
     selectors = []
     for n in names:
         selectors += [
@@ -450,7 +726,7 @@ def _addr_input(addr: FrameLocator, *names: str):
     return addr.locator(", ".join(selectors)).first
 
 
-def _addr_select(addr: FrameLocator, *names: str):
+def _addr_select(addr: FrameLocator, *names: str) -> Locator:
     selectors = []
     for n in names:
         selectors += [
@@ -466,7 +742,7 @@ def fill_billing(page: Page, full_name: str, address: str,
     log("filling Stripe billing form")
     addr = stripe_address_frame(page)
     name_input = _addr_input(addr, "name")
-    name_input.wait_for(state="visible", timeout=20000)
+    name_input.wait_for(state="visible", timeout=STRIPE_NAME_INPUT_TIMEOUT_MS)
 
     country_select = _addr_select(addr, "country")
     country_select.select_option(label="Indonesia")
@@ -477,11 +753,13 @@ def fill_billing(page: Page, full_name: str, address: str,
     _addr_input(addr, "city", "locality").fill(city)
 
     province_select = _addr_select(addr, "state", "administrativeArea")
-    province_select.wait_for(state="visible", timeout=5000)
+    province_select.wait_for(state="visible", timeout=STRIPE_PROVINCE_TIMEOUT_MS)
     options = province_select.locator("option").all_text_contents()
     target = next((o for o in options if province.lower() in o.lower()), None)
     if target is None:
-        raise RuntimeError(f"province '{province}' not found among {options[:5]}…")
+        raise RuntimeError(
+            f"province '{province}' not found among {options[:5]}…"
+        )
     province_select.select_option(label=target)
 
     _addr_input(addr, "postal_code", "postalCode").fill(postal)
@@ -491,8 +769,12 @@ def fill_billing(page: Page, full_name: str, address: str,
 
 def submit_subscribe(page: Page) -> None:
     log("clicking Subscribe → Midtrans GoPay redirect")
-    page.locator('button[aria-label="Subscribe"]').first.click(timeout=10000)
-    page.wait_for_url("https://app.midtrans.com/snap/**", timeout=60000)
+    page.locator('button[aria-label="Subscribe"]').first.click(
+        timeout=STRIPE_SUBSCRIBE_CLICK_TIMEOUT_MS
+    )
+    page.wait_for_url(
+        "https://app.midtrans.com/snap/**", timeout=MIDTRANS_NAV_TIMEOUT_MS
+    )
     log(f"on Midtrans: {page.url[:120]}…")
 
 
@@ -518,33 +800,39 @@ def _find_gopay_frame(page: Page) -> FrameLocator | None:
 
 def midtrans_link_phone(page: Page, phone: str) -> None:
     log(f"entering GoPay phone +62 {phone}")
-    page.wait_for_url("**/gopay-tokenization/linking", timeout=30000)
+    page.wait_for_url(
+        "**/gopay-tokenization/linking", timeout=GOPAY_LINKING_NAV_TIMEOUT_MS
+    )
     inp = page.locator('input[type="tel"]').first
-    inp.wait_for(state="visible", timeout=15000)
+    inp.wait_for(state="visible", timeout=GOPAY_PHONE_INPUT_TIMEOUT_MS)
     inp.click()
     inp.fill("")
-    inp.type(phone, delay=40)
+    _press_text(inp, phone, delay=PHONE_TYPE_DELAY_MS)
     page.wait_for_timeout(400)
-    page.get_by_role("button", name="Link and pay").first.click(timeout=10000)
+    page.get_by_role("button", name="Link and pay").first.click(
+        timeout=GOPAY_LINK_PAY_TIMEOUT_MS
+    )
     log("clicked Link and pay")
 
 
 def midtrans_confirm_hubungkan(page: Page) -> None:
     log("waiting for GoPay 'Hubungkan' confirmation iframe")
-    for _ in range(30):
+    for _ in range(IFRAME_POLL_ITERATIONS):
         for sel in GOPAY_IFRAME_SELECTORS:
             if page.locator(sel).count() == 0:
                 continue
             fl = page.frame_locator(sel).first
             btn = fl.locator('button:has-text("Hubungkan")').first
             try:
-                btn.wait_for(state="visible", timeout=2000)
+                btn.wait_for(
+                    state="visible", timeout=GOPAY_HUBUNGKAN_PROBE_TIMEOUT_MS
+                )
                 btn.click()
                 log("clicked Hubungkan")
                 return
             except PWTimeout:
                 continue
-        page.wait_for_timeout(500)
+        page.wait_for_timeout(IFRAME_POLL_INTERVAL_MS)
     log("Hubungkan iframe not found; falling back to coord click")
     page.mouse.click(512, 555)
 
@@ -556,10 +844,10 @@ def midtrans_enter_otp(page: Page, otp: str) -> None:
         raise RuntimeError("GoPay iframe not found for OTP step")
     fl.locator(
         'text=/Masukkin OTP|Enter OTP|Masukkan kode OTP|OTP yang dikirim/'
-    ).first.wait_for(state="visible", timeout=30000)
+    ).first.wait_for(state="visible", timeout=GOPAY_OTP_PROMPT_TIMEOUT_MS)
     inp = fl.locator('input').first
     inp.click()
-    inp.type(otp, delay=80)
+    _press_text(inp, otp)
     log("OTP submitted")
 
 
@@ -570,38 +858,44 @@ def midtrans_enter_pin(page: Page, pin: str, label: str) -> None:
         raise RuntimeError("GoPay iframe not found for PIN step")
     fl.locator(
         'text=/PIN kamu|PIN GoPay|6 digit PIN|Masukkin PIN/'
-    ).first.wait_for(state="visible", timeout=30000)
+    ).first.wait_for(state="visible", timeout=GOPAY_PIN_PROMPT_TIMEOUT_MS)
     inp = fl.locator('input').first
     inp.click()
-    inp.type(pin, delay=80)
+    _press_text(inp, pin)
     log(f"PIN ({label}) submitted")
 
 
 def midtrans_pay_now(page: Page) -> None:
     log("clicking Pay now")
-    page.wait_for_url("**/gopay-tokenization/pay", timeout=30000)
-    page.get_by_role("button", name="Pay now").first.click(timeout=10000)
+    page.wait_for_url(
+        "**/gopay-tokenization/pay", timeout=GOPAY_PAY_NAV_TIMEOUT_MS
+    )
+    page.get_by_role("button", name="Pay now").first.click(
+        timeout=GOPAY_PAY_CLICK_TIMEOUT_MS
+    )
 
 
 def midtrans_confirm_bayar(page: Page) -> None:
     log("confirming GoPay 'Bayar' inside iframe")
     fl = None
-    for _ in range(30):
+    for _ in range(IFRAME_POLL_ITERATIONS):
         fl = _find_gopay_frame(page)
         if fl is not None:
             break
-        page.wait_for_timeout(500)
+        page.wait_for_timeout(IFRAME_POLL_INTERVAL_MS)
     if fl is None:
         raise RuntimeError("GoPay iframe not found for Bayar step")
     btn = fl.locator('button:has-text("Bayar")').first
-    btn.wait_for(state="visible", timeout=20000)
+    btn.wait_for(state="visible", timeout=GOPAY_BAYAR_TIMEOUT_MS)
     btn.click()
     log("clicked Bayar")
 
 
 def wait_for_success(page: Page) -> None:
     log("waiting for ChatGPT payments/success redirect")
-    page.wait_for_url("**/payments/success**", timeout=60000)
+    page.wait_for_url(
+        "**/payments/success**", timeout=SUCCESS_REDIRECT_TIMEOUT_MS
+    )
     log(f"SUCCESS — {page.url[:120]}…")
 
 
@@ -614,15 +908,32 @@ def claim_trial(page: Page, email: str, password: str, full_name: str,
                 phone: str, pin: str, otp_url: str, otp_token: str,
                 otp_timeout: int, address: str, city: str, province: str,
                 postal: str, bot_token: str, chat_id: str) -> None:
-    chatgpt_login(page, email, password)
-    open_pricing_modal(page)
-    switch_to_personal(page)
-    pick_indonesia_country(page)
-    claim_free_offer(page)
-    fill_billing(page, full_name, address, city, province, postal)
-    submit_subscribe(page)
-    midtrans_link_phone(page, phone)
-    midtrans_confirm_hubungkan(page)
+    """Drive the full 17-UI-step claim flow.
+
+    Each logical step is wrapped in :func:`_step` so a failure produces a
+    self-contained debug bundle (PNG + HTML + .txt) under
+    ``DEBUG_ARTIFACTS_DIR``, ready for the workflow's upload-artifact step.
+    """
+    with _step("login", page):
+        chatgpt_login(page, email, password)
+    with _step("dismiss_onboarding", page):
+        dismiss_chatgpt_onboarding(page)
+    with _step("open_pricing_modal", page):
+        open_pricing_modal(page)
+    with _step("switch_to_personal", page):
+        switch_to_personal(page)
+    with _step("pick_indonesia_country", page):
+        pick_indonesia_country(page)
+    with _step("claim_free_offer", page):
+        claim_free_offer(page)
+    with _step("fill_billing", page):
+        fill_billing(page, full_name, address, city, province, postal)
+    with _step("submit_subscribe", page):
+        submit_subscribe(page)
+    with _step("midtrans_link_phone", page):
+        midtrans_link_phone(page, phone)
+    with _step("midtrans_confirm_hubungkan", page):
+        midtrans_confirm_hubungkan(page)
 
     # Discard any stale `/otp` left behind by a previous claim run before
     # we ask the user for a fresh code. Otherwise poll_otp_url would
@@ -637,14 +948,21 @@ def claim_trial(page: Page, email: str, password: str, full_name: str,
             "Kirim balik dengan: /otp 123456 (5 menit)."
         ),
     )
-    otp = poll_otp_url(otp_url, otp_token, timeout_s=otp_timeout)
-    midtrans_enter_otp(page, otp)
+    with _step("poll_otp", page):
+        otp = poll_otp_url(otp_url, otp_token, timeout_s=otp_timeout)
+    with _step("midtrans_enter_otp", page):
+        midtrans_enter_otp(page, otp)
 
-    midtrans_enter_pin(page, pin, "linking")
-    midtrans_pay_now(page)
-    midtrans_confirm_bayar(page)
-    midtrans_enter_pin(page, pin, "payment")
-    wait_for_success(page)
+    with _step("midtrans_enter_pin_linking", page):
+        midtrans_enter_pin(page, pin, "linking")
+    with _step("midtrans_pay_now", page):
+        midtrans_pay_now(page)
+    with _step("midtrans_confirm_bayar", page):
+        midtrans_confirm_bayar(page)
+    with _step("midtrans_enter_pin_payment", page):
+        midtrans_enter_pin(page, pin, "payment")
+    with _step("wait_for_success", page):
+        wait_for_success(page)
 
 
 def main() -> int:
@@ -662,6 +980,26 @@ def main() -> int:
     p.add_argument("--province", default=DEFAULT_PROVINCE)
     p.add_argument("--postal-code", default=DEFAULT_POSTAL)
     args = p.parse_args()
+
+    # Fail-fast on malformed inputs before we spin up Xvfb + Chromium.
+    # The Midtrans GoPay form already prefixes "+62", so the supplied phone
+    # must be the bare local-number (e.g. "85951756709"). A leading "+" or
+    # "0" produces "+620…" or "+62+62…" which Midtrans rejects.
+    phone_digits = args.phone.strip()
+    if (
+        not phone_digits.isdigit()
+        or not (8 <= len(phone_digits) <= 13)
+        or phone_digits.startswith("0")
+    ):
+        p.error(
+            "--phone must be 8-13 digits without leading + or 0 "
+            f"(got {args.phone!r})"
+        )
+    pin_digits = args.pin.strip()
+    if not pin_digits.isdigit() or len(pin_digits) != 6:
+        p.error(f"--pin must be exactly 6 digits (got {len(pin_digits)})")
+    args.phone = phone_digits
+    args.pin = pin_digits
 
     account_id = os.environ.get("CF_ACCOUNT_ID", DEFAULT_CF_ACCOUNT)
     db_id = os.environ.get("D1_DATABASE_ID", DEFAULT_D1_DB)
@@ -744,15 +1082,13 @@ def main() -> int:
             return 1
         except Exception as e:
             elapsed = round(time.time() - t0, 1)
-            escaped = (str(e).replace("&", "&amp;")
-                       .replace("<", "&lt;").replace(">", "&gt;"))
             log(f"FAILED: {type(e).__name__}: {e}")
             telegram_send(
                 bot_token,
                 chat_id,
                 (
                     f"❌ <b>Claim gagal</b> untuk <code>{email}</code>\n"
-                    f"<code>{type(e).__name__}: {escaped}</code>\n"
+                    f"<code>{type(e).__name__}: {_escape_html(str(e))}</code>\n"
                     f"Durasi: {elapsed}s"
                 ),
             )
