@@ -344,12 +344,41 @@ def _is_already_logged_in(page: Page, timeout_ms: int = 8000) -> bool:
     return False
 
 
+def dismiss_onboarding_modal(page: Page, timeout_ms: int = 5000) -> bool:
+    """Close the 'What brings you to ChatGPT?' survey if it is showing.
+
+    Fresh accounts that land on chatgpt.com with a valid session hit this
+    onboarding modal before anything else. If we don't dismiss it,
+    later clicks on the pricing modal (Personal toggle, country picker)
+    get routed to the onboarding behind it, closing our modal and
+    stranding the claim flow. Clicking Skip is idempotent — the button
+    just isn't there on a second visit.
+    """
+    skip_btn = page.locator('button:has-text("Skip")').first
+    deadline = time.time() + timeout_ms / 1000.0
+    while time.time() < deadline:
+        try:
+            if skip_btn.is_visible(timeout=500):
+                log("dismissing 'What brings you to ChatGPT?' onboarding")
+                try:
+                    skip_btn.click(timeout=2000)
+                except PWTimeout:
+                    skip_btn.click(timeout=2000, force=True)
+                page.wait_for_timeout(500)
+                return True
+        except Exception:
+            pass
+        page.wait_for_timeout(300)
+    return False
+
+
 def chatgpt_login(page: Page, email: str, password: str) -> None:
     log(f"logging in as {email}")
     page.goto("https://chatgpt.com/", wait_until="domcontentloaded")
     # If cookies already authenticated us, skip the Auth0 form entirely.
     if _is_already_logged_in(page, timeout_ms=8000):
         log("cookie session detected — skipping /auth/login form")
+        dismiss_onboarding_modal(page)
         return
     found = _wait_for_email_or_login_button(page, total_ms=60000)
     if found == "login":
@@ -387,6 +416,7 @@ def chatgpt_login(page: Page, email: str, password: str) -> None:
             raise RuntimeError(f"login requires MFA/verification: {page.url}")
         raise
     page.wait_for_load_state("domcontentloaded")
+    dismiss_onboarding_modal(page)
     log("login complete")
 
 
@@ -431,13 +461,29 @@ def open_pricing_modal(page: Page) -> None:
 
 
 def switch_to_personal(page: Page) -> None:
+    """Ensure the pricing modal is showing the Personal/Plus card.
+
+    The promo modal sometimes lands on the Personal tab directly, in
+    which case the ``Claim free offer`` button is already visible and
+    we must not click the toggle again — force-clicking it while the
+    Personal tab is active has been observed to close the modal and
+    re-open the onboarding survey, leaving the claim flow stranded.
+    """
+    claim_btn = page.locator('button:has-text("Claim free offer")').first
+    if claim_btn.is_visible():
+        log("Personal tab already active (Claim free offer visible)")
+        return
     log("switching pricing to Personal tab (Plus card)")
-    btn = page.locator('button[aria-label="Toggle for switching to Personal plans"]').first
+    btn = page.locator(
+        'button[aria-label="Toggle for switching to Personal plans"]'
+    ).first
     try:
         btn.click(timeout=4000, force=True)
     except PWTimeout:
         log("personal toggle click failed (probably already active)")
-    page.wait_for_selector('button:has-text("Claim free offer")', timeout=10000)
+    page.wait_for_selector(
+        'button:has-text("Claim free offer")', timeout=10000
+    )
 
 
 def pick_indonesia_country(page: Page) -> None:
