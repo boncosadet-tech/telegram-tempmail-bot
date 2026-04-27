@@ -223,6 +223,18 @@ def ensure_accounts_table(account_id: str, db_id: str) -> None:
         ")"
     )
     d1_query_params(account_id, db_id, sql, [])
+    # Additive migration: older deployments of this table predate the
+    # cookies column. ADD COLUMN is idempotent via the catch-all below —
+    # SQLite raises "duplicate column" if it already exists, which we
+    # swallow so this stays safe to call on every run.
+    try:
+        d1_query_params(
+            account_id, db_id,
+            "ALTER TABLE chatgpt_accounts ADD COLUMN cookies TEXT", [],
+        )
+    except RuntimeError as exc:
+        if "duplicate column" not in str(exc).lower():
+            raise
     _ACCOUNTS_TABLE_READY = True
 
 
@@ -231,20 +243,26 @@ def record_account(account_id: str, db_id: str, result: dict) -> None:
     ensure_accounts_table(account_id, db_id)
     sql = (
         "INSERT INTO chatgpt_accounts "
-        "(email, password, full_name, alias_local, age, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?) "
+        "(email, password, full_name, alias_local, age, created_at, cookies) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(email) DO UPDATE SET "
         "password = excluded.password, "
         "full_name = excluded.full_name, "
         "alias_local = excluded.alias_local, "
         "age = excluded.age, "
-        "created_at = excluded.created_at"
+        "created_at = excluded.created_at, "
+        "cookies = COALESCE(excluded.cookies, chatgpt_accounts.cookies)"
     )
     now_ms = int(time.time() * 1000)
     alias_local = result["email"].split("@", 1)[0]
+    cookies_blob = result.get("cookies")
+    cookies_json = (
+        json.dumps(cookies_blob, separators=(",", ":"))
+        if cookies_blob else None
+    )
     d1_query_params(account_id, db_id, sql, [
         result["email"], result["password"], result.get("full_name", ""),
-        alias_local, int(result.get("age") or 0), now_ms,
+        alias_local, int(result.get("age") or 0), now_ms, cookies_json,
     ])
 
 
@@ -543,7 +561,7 @@ def main() -> int:
         telegram_send(bot_token, chat_id, msg)
         return 1
 
-    cookies = result.pop("cookies")
+    cookies = result.get("cookies") or []
     os.makedirs(args.out_dir, exist_ok=True)
     cookies_path = os.path.join(args.out_dir, f"{args.alias}-cookies.json")
     with open(cookies_path, "w") as f:
@@ -552,6 +570,11 @@ def main() -> int:
     # Persist + render rolling 30-day account list.
     try:
         record_account(account_id, db_id, result)
+        # `record_account` now stores cookies in D1 alongside credentials,
+        # so the downstream /claim flow can inject them into the browser
+        # instead of depending on the flaky ChatGPT login page. Drop the
+        # blob from the in-memory result before we render the text summary.
+        result.pop("cookies", None)
         accounts_path = os.path.join(args.out_dir, "akun.txt")
         write_accounts_file(account_id, db_id, accounts_path)
     except Exception as e:

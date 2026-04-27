@@ -116,6 +116,84 @@ def lookup_account_password(account_id: str, db_id: str, email: str) -> str:
     return pw
 
 
+def lookup_account_cookies(
+    account_id: str, db_id: str, email: str
+) -> list[dict]:
+    """Read stored signup cookies for ``email`` from chatgpt_accounts.
+
+    Signup persists the logged-in browser cookies so we can later import
+    them instead of going through ChatGPT's ``/auth/login`` flow — which
+    is known-flaky (the email field sometimes never renders). Returns an
+    empty list if the column is missing, NULL, or unparseable.
+    """
+    ensure_accounts_table(account_id, db_id)
+    sql = "SELECT cookies FROM chatgpt_accounts WHERE email = ? LIMIT 1"
+    try:
+        res = d1_query_params(account_id, db_id, sql, [email])
+    except RuntimeError as exc:
+        # Old D1 deployments without the cookies column respond with
+        # "no such column: cookies" — that's a benign miss, fall back to
+        # email+password login.
+        if "no such column" in str(exc).lower():
+            return []
+        raise
+    rows = (res.get("result") or [{}])[0].get("results") or []
+    if not rows:
+        return []
+    blob = rows[0].get("cookies")
+    if not blob:
+        return []
+    try:
+        parsed = json.loads(blob)
+    except (TypeError, ValueError):
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def playwright_cookies_from_editor(cookies: list[dict]) -> list[dict]:
+    """Convert Cookie-Editor style entries to Playwright-native shape.
+
+    Signup exports cookies in the Cookie-Editor schema (keys like
+    ``sameSite: "no_restriction"``, ``hostOnly``, ``expirationDate``).
+    Playwright's ``context.add_cookies`` wants the native Chrome DevTools
+    Protocol schema instead. Translate here and drop entries that are
+    malformed rather than raising — we'd rather fall back to password
+    login than abort the whole claim.
+    """
+    ss_map = {
+        "no_restriction": "None",
+        "lax": "Lax",
+        "strict": "Strict",
+        "unspecified": "Lax",
+    }
+    out: list[dict] = []
+    for c in cookies:
+        name = c.get("name")
+        value = c.get("value")
+        domain = c.get("domain") or ""
+        if not name or value is None or not domain:
+            continue
+        entry: dict = {
+            "name": name,
+            "value": value,
+            "domain": domain,
+            "path": c.get("path") or "/",
+            "secure": bool(c.get("secure", False)),
+            "httpOnly": bool(c.get("httpOnly", False)),
+            "sameSite": ss_map.get(
+                (c.get("sameSite") or "lax").lower(), "Lax"
+            ),
+        }
+        exp = c.get("expirationDate")
+        if exp and not c.get("session"):
+            try:
+                entry["expires"] = float(exp)
+            except (TypeError, ValueError):
+                pass
+        out.append(entry)
+    return out
+
+
 def derive_full_name_from_email(email: str) -> str:
     local = email.split("@", 1)[0]
     cleaned = local.replace(".", " ").replace("-", " ").replace("_", " ")
@@ -235,9 +313,44 @@ def _wait_for_email_or_login_button(page: Page, total_ms: int = 60000) -> str:
     raise PWTimeout(f"login UI did not render within {total_ms}ms")
 
 
+def _is_already_logged_in(page: Page, timeout_ms: int = 8000) -> bool:
+    """Best-effort check: on chatgpt.com, are we already authenticated?
+
+    We look for the composer / "New chat" UI which only renders for
+    logged-in sessions. Any locator that matches wins. If nothing
+    matches within ``timeout_ms`` we return False and the caller will
+    proceed with the normal password login flow.
+    """
+    try:
+        page.wait_for_load_state("domcontentloaded", timeout=timeout_ms)
+    except PWTimeout:
+        return False
+    candidates = (
+        'textarea[data-testid="prompt-textarea"]',
+        'form textarea',
+        '[data-testid="send-button"]',
+        'button:has-text("New chat")',
+        'nav[aria-label="Chat history"]',
+    )
+    deadline = time.time() + timeout_ms / 1000.0
+    while time.time() < deadline:
+        for sel in candidates:
+            try:
+                if page.locator(sel).first.is_visible(timeout=500):
+                    return True
+            except Exception:
+                continue
+        page.wait_for_timeout(500)
+    return False
+
+
 def chatgpt_login(page: Page, email: str, password: str) -> None:
     log(f"logging in as {email}")
     page.goto("https://chatgpt.com/", wait_until="domcontentloaded")
+    # If cookies already authenticated us, skip the Auth0 form entirely.
+    if _is_already_logged_in(page, timeout_ms=8000):
+        log("cookie session detected — skipping /auth/login form")
+        return
     found = _wait_for_email_or_login_button(page, total_ms=60000)
     if found == "login":
         for role, name in (
@@ -664,6 +777,21 @@ def main() -> int:
             return 1
 
     full_name = args.full_name or derive_full_name_from_email(email)
+
+    # Load previously-saved signup cookies from D1, if present. When we
+    # have them we inject them into the Playwright context before the
+    # first page.goto so the browser lands on chatgpt.com already
+    # authenticated — bypassing the flaky /auth/login selector that has
+    # been timing out for this account family.
+    try:
+        raw_cookies = lookup_account_cookies(account_id, db_id, email)
+    except Exception as e:
+        log(f"cookies lookup failed (will fall back to password login): {e}")
+        raw_cookies = []
+    pw_cookies = playwright_cookies_from_editor(raw_cookies)
+    if pw_cookies:
+        log(f"loaded {len(pw_cookies)} cookies from D1 for {email}")
+
     telegram_send(
         bot_token,
         chat_id,
@@ -680,6 +808,12 @@ def main() -> int:
             viewport={"width": 1280, "height": 900},
             locale="en-US",
         )
+        if pw_cookies:
+            try:
+                context.add_cookies(pw_cookies)
+            except Exception as e:
+                log(f"add_cookies failed, continuing with password login: {e}")
+                pw_cookies = []
         page = context.new_page()
         try:
             claim_trial(
