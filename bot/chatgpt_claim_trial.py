@@ -235,27 +235,50 @@ def _wait_for_email_or_login_button(page: Page, total_ms: int = 60000) -> str:
     raise PWTimeout(f"login UI did not render within {total_ms}ms")
 
 
+def _click_login_entry(page: Page) -> bool:
+    """Click whichever 'Log in' / 'Sign in' entry point is currently visible
+    on the chatgpt.com landing page. Returns True if a click landed."""
+    for role, name in (
+        ("button", "Log in"),
+        ("link", "Log in"),
+        ("button", "Sign in"),
+        ("link", "Sign in"),
+    ):
+        try:
+            page.get_by_role(role, name=name, exact=True).first.click(timeout=4000)
+            return True
+        except PWTimeout:
+            continue
+    return False
+
+
 def chatgpt_login(page: Page, email: str, password: str) -> None:
     log(f"logging in as {email}")
     page.goto("https://chatgpt.com/", wait_until="domcontentloaded")
     found = _wait_for_email_or_login_button(page, total_ms=60000)
     if found == "login":
-        for role, name in (
-            ("button", "Log in"),
-            ("link", "Log in"),
-            ("button", "Sign in"),
-            ("link", "Sign in"),
-        ):
-            try:
-                page.get_by_role(role, name=name, exact=True).first.click(timeout=4000)
-                break
-            except PWTimeout:
-                continue
+        _click_login_entry(page)
         # Auth0 sometimes shows another turnstile after navigating.
         cf_turnstile_clickbox(page, timeout_ms=8000)
 
+    # The email input sometimes refuses to render on cold launches even
+    # after the Log-in entry is clicked — typically a slow /auth/login
+    # bootstrap or a Turnstile challenge that finishes *after* our click.
+    # Reload once and re-drive the landing page instead of surfacing a
+    # 45s timeout that burns a whole GitHub Actions run.
     email_input = page.locator(EMAIL_SELECTOR).first
-    email_input.wait_for(state="visible", timeout=45000)
+    try:
+        email_input.wait_for(state="visible", timeout=45000)
+    except PWTimeout:
+        log("email input did not render — reloading and retrying once")
+        page.reload(wait_until="domcontentloaded")
+        cf_turnstile_clickbox(page, timeout_ms=8000)
+        # If the landing page still shows the Log-in entry, click it
+        # again; otherwise the email input should already be mounted.
+        if not page.locator(EMAIL_SELECTOR).first.is_visible():
+            _click_login_entry(page)
+            cf_turnstile_clickbox(page, timeout_ms=8000)
+        email_input.wait_for(state="visible", timeout=45000)
     email_input.fill(email)
     page.get_by_role("button", name="Continue", exact=True).first.click(timeout=10000)
     cf_turnstile_clickbox(page, timeout_ms=6000)
