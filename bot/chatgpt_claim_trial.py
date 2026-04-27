@@ -982,8 +982,15 @@ def main() -> int:
     args = p.parse_args()
 
     # Fail-fast on malformed inputs before we spin up Xvfb + Chromium.
+    # The Midtrans GoPay form already prefixes "+62", so the supplied phone
+    # must be the bare local-number (e.g. "85951756709"). A leading "+" or
+    # "0" produces "+620…" or "+62+62…" which Midtrans rejects.
     phone_digits = args.phone.strip()
-    if not phone_digits.isdigit() or not (8 <= len(phone_digits) <= 13):
+    if (
+        not phone_digits.isdigit()
+        or not (8 <= len(phone_digits) <= 13)
+        or phone_digits.startswith("0")
+    ):
         p.error(
             "--phone must be 8-13 digits without leading + or 0 "
             f"(got {args.phone!r})"
