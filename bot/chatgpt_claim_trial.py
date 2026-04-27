@@ -50,6 +50,7 @@ CLI:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import re
@@ -57,8 +58,10 @@ import sys
 import time
 import urllib.parse
 import urllib.request
+from collections.abc import Iterator
 
 from patchright.sync_api import (
+    Error as PWError,
     FrameLocator,
     Locator,
     Page,
@@ -137,6 +140,11 @@ IFRAME_POLL_INTERVAL_MS = 500
 DEFAULT_TYPE_DELAY_MS = 80
 PHONE_TYPE_DELAY_MS = 40
 
+# Where per-step failure artifacts (PNG screenshot + HTML snapshot + .txt
+# context) are written. Honours the env var so the workflow can override.
+DEBUG_ARTIFACTS_DIR = os.environ.get("DEBUG_ARTIFACTS_DIR", "debug-artifacts")
+FAILURE_SCREENSHOT_TIMEOUT_MS = 10_000
+
 # Login entry-point fallbacks (probed in order on the chatgpt.com landing
 # page). Both the wait-for-loaded helper and the click helper share this
 # list so they stay in sync.
@@ -183,6 +191,101 @@ def _press_text(loc: Locator, text: str, delay: int = DEFAULT_TYPE_DELAY_MS) -> 
         press_seq(text, delay=delay)
     else:  # pragma: no cover — defensive fallback for older patchright
         loc.type(text, delay=delay)
+
+
+def _capture_failure(
+    page: Page | None,
+    step: str,
+    exc: BaseException,
+    out_dir: str = DEBUG_ARTIFACTS_DIR,
+) -> list[str]:
+    """Persist a debug bundle for a failed claim step.
+
+    Writes up to three files into ``out_dir`` (created on demand):
+
+    - ``<HHMMSS>_<step>.txt`` — step name, exception, current URL/title.
+    - ``<HHMMSS>_<step>.png`` — full-page screenshot at moment of failure.
+    - ``<HHMMSS>_<step>.html`` — rendered HTML snapshot (selector debug).
+
+    The PNG and HTML are best-effort: if the page is already closed or the
+    screenshot itself times out, we still emit the .txt so the artifact
+    bundle is never empty. Returns the list of paths actually written.
+    """
+    try:
+        os.makedirs(out_dir, exist_ok=True)
+    except OSError as e:
+        log(f"failure capture: cannot mkdir {out_dir}: {e}")
+        return []
+
+    safe_step = re.sub(r"[^a-zA-Z0-9_-]+", "_", step)[:40] or "unknown"
+    base = f"{time.strftime('%H%M%S')}_{safe_step}"
+    paths: list[str] = []
+
+    info_lines = [
+        f"step: {step}",
+        f"exception: {type(exc).__name__}: {exc}",
+        f"timestamp: {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}",
+    ]
+    if page is not None:
+        try:
+            info_lines.append(f"url: {page.url}")
+        except Exception as e:
+            info_lines.append(f"url: <unreadable: {e}>")
+        try:
+            info_lines.append(f"title: {page.title()}")
+        except Exception as e:
+            info_lines.append(f"title: <unreadable: {e}>")
+    info_path = os.path.join(out_dir, f"{base}.txt")
+    try:
+        with open(info_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(info_lines) + "\n")
+        paths.append(info_path)
+    except OSError as e:
+        log(f"failure capture: cannot write {info_path}: {e}")
+
+    if page is None:
+        return paths
+
+    png_path = os.path.join(out_dir, f"{base}.png")
+    try:
+        page.screenshot(
+            path=png_path,
+            full_page=True,
+            timeout=FAILURE_SCREENSHOT_TIMEOUT_MS,
+        )
+        paths.append(png_path)
+    except (PWError, PWTimeout, OSError) as e:
+        log(f"failure capture: screenshot failed: {e}")
+
+    html_path = os.path.join(out_dir, f"{base}.html")
+    try:
+        with open(html_path, "w", encoding="utf-8") as f:
+            f.write(page.content())
+        paths.append(html_path)
+    except (PWError, PWTimeout, OSError) as e:
+        log(f"failure capture: html dump failed: {e}")
+
+    log(f"captured failure artifacts ({len(paths)}): " + ", ".join(
+        os.path.basename(p) for p in paths
+    ))
+    return paths
+
+
+@contextlib.contextmanager
+def _step(
+    name: str,
+    page: Page | None,
+    out_dir: str = DEBUG_ARTIFACTS_DIR,
+) -> Iterator[None]:
+    """Wrap one logical claim step. On exception, capture a debug bundle
+    via :func:`_capture_failure` then re-raise unchanged."""
+    log(f"▶ step: {name}")
+    try:
+        yield
+    except BaseException as exc:
+        if not isinstance(exc, KeyboardInterrupt):
+            _capture_failure(page, name, exc, out_dir)
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -745,15 +848,30 @@ def claim_trial(page: Page, email: str, password: str, full_name: str,
                 phone: str, pin: str, otp_url: str, otp_token: str,
                 otp_timeout: int, address: str, city: str, province: str,
                 postal: str, bot_token: str, chat_id: str) -> None:
-    chatgpt_login(page, email, password)
-    open_pricing_modal(page)
-    switch_to_personal(page)
-    pick_indonesia_country(page)
-    claim_free_offer(page)
-    fill_billing(page, full_name, address, city, province, postal)
-    submit_subscribe(page)
-    midtrans_link_phone(page, phone)
-    midtrans_confirm_hubungkan(page)
+    """Drive the full 17-UI-step claim flow.
+
+    Each logical step is wrapped in :func:`_step` so a failure produces a
+    self-contained debug bundle (PNG + HTML + .txt) under
+    ``DEBUG_ARTIFACTS_DIR``, ready for the workflow's upload-artifact step.
+    """
+    with _step("login", page):
+        chatgpt_login(page, email, password)
+    with _step("open_pricing_modal", page):
+        open_pricing_modal(page)
+    with _step("switch_to_personal", page):
+        switch_to_personal(page)
+    with _step("pick_indonesia_country", page):
+        pick_indonesia_country(page)
+    with _step("claim_free_offer", page):
+        claim_free_offer(page)
+    with _step("fill_billing", page):
+        fill_billing(page, full_name, address, city, province, postal)
+    with _step("submit_subscribe", page):
+        submit_subscribe(page)
+    with _step("midtrans_link_phone", page):
+        midtrans_link_phone(page, phone)
+    with _step("midtrans_confirm_hubungkan", page):
+        midtrans_confirm_hubungkan(page)
 
     # Discard any stale `/otp` left behind by a previous claim run before
     # we ask the user for a fresh code. Otherwise poll_otp_url would
@@ -768,14 +886,21 @@ def claim_trial(page: Page, email: str, password: str, full_name: str,
             "Kirim balik dengan: /otp 123456 (5 menit)."
         ),
     )
-    otp = poll_otp_url(otp_url, otp_token, timeout_s=otp_timeout)
-    midtrans_enter_otp(page, otp)
+    with _step("poll_otp", page):
+        otp = poll_otp_url(otp_url, otp_token, timeout_s=otp_timeout)
+    with _step("midtrans_enter_otp", page):
+        midtrans_enter_otp(page, otp)
 
-    midtrans_enter_pin(page, pin, "linking")
-    midtrans_pay_now(page)
-    midtrans_confirm_bayar(page)
-    midtrans_enter_pin(page, pin, "payment")
-    wait_for_success(page)
+    with _step("midtrans_enter_pin_linking", page):
+        midtrans_enter_pin(page, pin, "linking")
+    with _step("midtrans_pay_now", page):
+        midtrans_pay_now(page)
+    with _step("midtrans_confirm_bayar", page):
+        midtrans_confirm_bayar(page)
+    with _step("midtrans_enter_pin_payment", page):
+        midtrans_enter_pin(page, pin, "payment")
+    with _step("wait_for_success", page):
+        wait_for_success(page)
 
 
 def main() -> int:
