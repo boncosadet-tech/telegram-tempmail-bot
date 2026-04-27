@@ -109,6 +109,12 @@ TURNSTILE_LANDING_TIMEOUT_MS = 4_000
 LOGIN_ENTRY_PROBE_TIMEOUT_MS = 1_500
 LOGIN_ENTRY_CLICK_TIMEOUT_MS = 4_000
 
+ONBOARDING_DIALOG_PROBE_MS = 5_000
+ONBOARDING_CLICK_TIMEOUT_MS = 4_000
+# chatgpt.com's interest-picker has up to 3 pages on a fresh account
+# (onboarding_interest_picker_max_depth). Loop budget = 5 to be safe.
+ONBOARDING_MAX_STEPS = 5
+
 PRICING_MODAL_TIMEOUT_MS = 8_000
 PRICING_MODAL_CLICK_TIMEOUT_MS = 4_000
 PERSONAL_TOGGLE_CLICK_TIMEOUT_MS = 4_000
@@ -507,6 +513,60 @@ class NoPromoOffer(RuntimeError):
     """Raised when the account does not qualify for the free trial promo."""
 
 
+def dismiss_chatgpt_onboarding(page: Page) -> None:
+    """Skip post-login "What brings you to ChatGPT?" interest-picker.
+
+    Brand-new accounts hit a modal ``<dialog>`` immediately after auth that
+    blocks every other UI surface (sidebar, pricing modal, profile menu).
+    The picker can be up to 3 pages deep on chatgpt.com, so we loop
+    clicking the dialog's "Skip" button — with a one-shot "Next" fallback
+    if Skip is somehow non-interactive — until the dialog is gone.
+
+    No-op for already-onboarded accounts: if no modal dialog appears within
+    :data:`ONBOARDING_DIALOG_PROBE_MS` we return immediately.
+    """
+    onboarding_dialog = page.locator(
+        'dialog[aria-modal="true"][open]:has(button:has-text("Skip"))'
+    ).first
+    for step in range(1, ONBOARDING_MAX_STEPS + 1):
+        try:
+            onboarding_dialog.wait_for(
+                state="visible", timeout=ONBOARDING_DIALOG_PROBE_MS
+            )
+        except PWTimeout:
+            if step == 1:
+                log("no onboarding dialog detected (already onboarded)")
+            else:
+                log(f"onboarding dismissed after {step - 1} step(s)")
+            return
+        skip_btn = onboarding_dialog.get_by_role(
+            "button", name="Skip", exact=True
+        ).first
+        try:
+            skip_btn.click(timeout=ONBOARDING_CLICK_TIMEOUT_MS)
+            log(f"clicked Skip on onboarding (step {step})")
+            continue
+        except PWTimeout:
+            log(f"Skip not clickable on step {step}; trying Next fallback")
+        next_btn = onboarding_dialog.get_by_role(
+            "button", name="Next", exact=True
+        ).first
+        try:
+            # Pick the first available option so Next becomes enabled.
+            onboarding_dialog.locator('button[aria-pressed="false"]').first.click(
+                timeout=ONBOARDING_CLICK_TIMEOUT_MS
+            )
+            next_btn.click(timeout=ONBOARDING_CLICK_TIMEOUT_MS)
+            log(f"clicked option + Next as fallback (step {step})")
+        except PWTimeout as e:
+            log(f"both Skip and Next failed on onboarding step {step}: {e}")
+            raise
+    log(
+        f"onboarding loop hit ONBOARDING_MAX_STEPS={ONBOARDING_MAX_STEPS}; "
+        "continuing in case the dialog has just closed."
+    )
+
+
 def open_pricing_modal(page: Page) -> None:
     log("opening pricing modal")
     if "chatgpt.com" not in page.url:
@@ -856,6 +916,8 @@ def claim_trial(page: Page, email: str, password: str, full_name: str,
     """
     with _step("login", page):
         chatgpt_login(page, email, password)
+    with _step("dismiss_onboarding", page):
+        dismiss_chatgpt_onboarding(page)
     with _step("open_pricing_modal", page):
         open_pricing_modal(page)
     with _step("switch_to_personal", page):
