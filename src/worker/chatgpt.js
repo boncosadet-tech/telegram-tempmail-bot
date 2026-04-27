@@ -5,6 +5,8 @@
 const DEFAULT_REPO = "moahaassy-design/telegram-tempmail-bot";
 const DEFAULT_EVENT_TYPE = "chatgpt-signup";
 const CLAIM_EVENT_TYPE = "chatgpt-claim";
+const REVOKE_EVENT_TYPE = "chatgpt-revoke";
+const AUTOREVOKE_EVENT_TYPE = "chatgpt-autorevoke";
 
 /** Lightweight argv parser for the `/chatgpt` command body. */
 export function parseChatgptArgs(rawText) {
@@ -216,6 +218,95 @@ export const CLAIM_HELP_TEXT = [
   "",
   "Setelah trigger, bot akan minta OTP WhatsApp via /otp 123456.",
   "Akun yang gak punya free offer otomatis di-skip."
+].join("\n");
+
+/**
+ * Parse `email` from the body of `/revoke <email>` or `/autorevoke <email>`.
+ * Shares the same strictness as `parseClaimEmail`.
+ */
+export function parseRevokeEmail(rawText) {
+  return parseClaimEmail(rawText);
+}
+
+async function dispatchWorkflow(env, eventType, clientPayload) {
+  const pat = env.GITHUB_PAT;
+  const repo = env.GITHUB_REPO || DEFAULT_REPO;
+  if (!pat) {
+    return { ok: false, error: "GITHUB_PAT secret is not set on the worker." };
+  }
+  const url = `https://api.github.com/repos/${repo}/dispatches`;
+  const body = { event_type: eventType, client_payload: clientPayload };
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${pat}`,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      "Content-Type": "application/json",
+      "User-Agent": "telegram-tempmail-bot"
+    },
+    body: JSON.stringify(body)
+  });
+  if (resp.status >= 200 && resp.status < 300) {
+    return { ok: true, repo };
+  }
+  let detail = "";
+  try {
+    detail = (await resp.text()).slice(0, 300);
+  } catch {
+    /* ignore */
+  }
+  return { ok: false, error: `GitHub API ${resp.status}: ${detail}` };
+}
+
+/**
+ * Trigger the ``chatgpt-revoke`` workflow for a single account. The
+ * workflow runs ``bot/chatgpt_revoke.py`` which cancels the ChatGPT Plus
+ * subscription via the Stripe customer portal (no OTP required — Stripe
+ * accepts the same logged-in session used for signup).
+ */
+export async function triggerChatgptRevoke(env, chatId, email) {
+  return dispatchWorkflow(env, REVOKE_EVENT_TYPE, {
+    email,
+    chat_id: String(chatId)
+  });
+}
+
+/**
+ * Trigger the ``chatgpt-autorevoke`` workflow which chains claim → wait
+ * for ``payments/success`` → revoke in a single runner job. Useful for
+ * users who want a one-shot "give me Plus and auto-cancel before the
+ * next cycle" flow.
+ */
+export async function triggerChatgptAutorevoke(env, chatId, email) {
+  return dispatchWorkflow(env, AUTOREVOKE_EVENT_TYPE, {
+    email,
+    chat_id: String(chatId)
+  });
+}
+
+export const REVOKE_HELP_TEXT = [
+  "🚫 /revoke <email> — cancel ChatGPT Plus subscription (stop next billing cycle).",
+  "",
+  "Contoh:",
+  "/revoke adit.brooks@areyoustudent.me",
+  "",
+  "Script login ke chatgpt.com pakai password di D1, buka Stripe",
+  "customer portal, klik Cancel plan. Tidak minta OTP / PIN.",
+  "Akses Plus tetap aktif sampai akhir periode berjalan."
+].join("\n");
+
+export const AUTOREVOKE_HELP_TEXT = [
+  "🔁 /autorevoke <email> — one-shot: claim free trial → auto cancel plan.",
+  "",
+  "Contoh:",
+  "/autorevoke adit.brooks@areyoustudent.me",
+  "",
+  "Workflow menjalankan 2 fase dalam 1 runner:",
+  "  1. claim trial (butuh OTP WA otomatis dari wa-otp-listener)",
+  "  2. cancel plan di Stripe portal supaya tidak ter-charge bulan depan",
+  "",
+  "Akses Plus tetap aktif sampai akhir periode trial."
 ].join("\n");
 
 export const CHATGPT_HELP_TEXT = [

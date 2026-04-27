@@ -1,0 +1,87 @@
+name: ChatGPT revoke subscription
+
+on:
+  workflow_dispatch:
+    inputs:
+      email:
+        description: "Target ChatGPT account email"
+        required: true
+      chat_id:
+        description: "Telegram chat id to send progress to"
+        required: false
+        default: ""
+
+  repository_dispatch:
+    types:
+      - chatgpt-revoke
+
+permissions:
+  contents: read
+
+# Serialize per-email so the same account can't be revoked twice in
+# parallel. Different emails run independently.
+concurrency:
+  group: chatgpt-revoke-${{ github.event.client_payload.email || inputs.email }}
+  cancel-in-progress: false
+
+jobs:
+  revoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_GLOBAL_API: ${{ secrets.CLOUDFLARE_GLOBAL_API }}
+      CLOUDFLARE_EMAIL: ${{ secrets.CLOUDFLARE_EMAIL }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TOKEN_BOT_TELEGRAM }}
+      OWNER_CHAT_ID: ${{ github.event.client_payload.chat_id || inputs.chat_id }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: bot/requirements.txt
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r bot/requirements.txt
+
+      - name: Compute Chromium cache key
+        id: cache-meta
+        run: |
+          set -e
+          ver=$(python -c "import importlib.metadata as m; print(m.version('patchright'))")
+          echo "key=patchright-${{ runner.os }}-${ver}-chromium-v1" >>"$GITHUB_OUTPUT"
+
+      - name: Cache Chromium browser
+        id: cache-chromium
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ steps.cache-meta.outputs.key }}
+
+      - name: Install Chromium system deps + Xvfb
+        run: |
+          set -e
+          python -m patchright install-deps chromium
+          sudo apt-get install -y --no-install-recommends xvfb
+
+      - name: Install Chromium binary
+        if: steps.cache-chromium.outputs.cache-hit != 'true'
+        run: python -m patchright install chromium
+
+      - name: Run revoke subscription
+        env:
+          PYTHONUNBUFFERED: "1"
+          INPUT_EMAIL: ${{ github.event.client_payload.email || inputs.email }}
+        run: |
+          set -e
+          if [ -z "$INPUT_EMAIL" ]; then echo "::error::email is required"; exit 1; fi
+          xvfb-run --auto-servernum --server-args='-screen 0 1366x900x24' \
+            python bot/chatgpt_revoke.py \
+              --email "$INPUT_EMAIL" \
+              --timeout 60

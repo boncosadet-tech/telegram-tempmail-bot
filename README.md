@@ -120,7 +120,9 @@ Itu saja. Termux/laptop boleh mati; semuanya jalan di Cloudflare.
 - `/chatgpt` → signup 1 akun ChatGPT pakai alias dari domain kamu (OTP signup di-baca otomatis dari D1)
 - `/creategpt N` → fan-out signup N akun paralel (max 10) lewat workflow matrix
 - `/claim <email>` → claim free trial GoPay (Indonesia, charge Rp 1) untuk akun ChatGPT yang sudah ada
-- `/otp <6-digit>` → relay OTP WhatsApp dari GoPay ke script claim yang sedang menunggu (one-shot, TTL 5 menit)
+- `/revoke <email>` → cancel ChatGPT Plus via Stripe customer portal (stop next billing cycle; akses Plus tetap aktif sampai akhir periode)
+- `/autorevoke <email>` → one-shot: claim trial → auto cancel plan (bisa "bebas charge bulan depan" dalam 1 run)
+- `/otp <6-digit>` → relay OTP WhatsApp manual **(fallback)**. Untuk end-to-end automation, deploy [`services/wa-otp-listener`](services/wa-otp-listener) di VM — OTP akan diangkat otomatis tanpa input manual.
 - Akun yang tidak punya promo "Try Plus free for 1 month" otomatis di-skip dengan exit code 2
 
 **Web dashboard private**

@@ -1,0 +1,29 @@
+[Unit]
+Description=WhatsApp OTP listener (Baileys) forwarding GoPay/Midtrans OTPs to the telegram-tempmail Worker
+Documentation=https://github.com/boncosadet-tech/telegram-tempmail-bot/tree/main/services/wa-otp-listener
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/repos/telegram-tempmail-bot/services/wa-otp-listener
+EnvironmentFile=/home/ubuntu/.wa-otp-listener/env
+ExecStart=/usr/bin/env node src/index.js
+Restart=always
+RestartSec=5s
+
+# Resource / security hardening.
+LimitNOFILE=65536
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/home/ubuntu/.wa-otp-listener
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=wa-otp-listener
+
+[Install]
+WantedBy=multi-user.target

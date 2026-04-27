@@ -1,0 +1,99 @@
+name: ChatGPT auto-revoke (claim + cancel)
+
+on:
+  workflow_dispatch:
+    inputs:
+      email:
+        description: "Target ChatGPT account email"
+        required: true
+      chat_id:
+        description: "Telegram chat id to send progress to"
+        required: false
+        default: ""
+
+  repository_dispatch:
+    types:
+      - chatgpt-autorevoke
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chatgpt-autorevoke-${{ github.event.client_payload.email || inputs.email }}
+  cancel-in-progress: false
+
+jobs:
+  autorevoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_GLOBAL_API: ${{ secrets.CLOUDFLARE_GLOBAL_API }}
+      CLOUDFLARE_EMAIL: ${{ secrets.CLOUDFLARE_EMAIL }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TOKEN_BOT_TELEGRAM }}
+      OWNER_CHAT_ID: ${{ github.event.client_payload.chat_id || inputs.chat_id }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: bot/requirements.txt
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r bot/requirements.txt
+
+      - name: Compute Chromium cache key
+        id: cache-meta
+        run: |
+          set -e
+          ver=$(python -c "import importlib.metadata as m; print(m.version('patchright'))")
+          echo "key=patchright-${{ runner.os }}-${ver}-chromium-v1" >>"$GITHUB_OUTPUT"
+
+      - name: Cache Chromium browser
+        id: cache-chromium
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ steps.cache-meta.outputs.key }}
+
+      - name: Install Chromium system deps + Xvfb
+        run: |
+          set -e
+          python -m patchright install-deps chromium
+          sudo apt-get install -y --no-install-recommends xvfb
+
+      - name: Install Chromium binary
+        if: steps.cache-chromium.outputs.cache-hit != 'true'
+        run: python -m patchright install chromium
+
+      - name: Run auto-revoke (claim + cancel)
+        env:
+          PYTHONUNBUFFERED: "1"
+          INPUT_EMAIL: ${{ github.event.client_payload.email || inputs.email }}
+          GOPAY_PHONE: ${{ secrets.GOPAY_PHONE }}
+          GOPAY_PIN: ${{ secrets.GOPAY_PIN }}
+          OTP_RELAY_URL: ${{ secrets.OTP_RELAY_URL }}
+          GOPAY_OTP_TOKEN: ${{ secrets.GOPAY_OTP_TOKEN }}
+        run: |
+          set -e
+          if [ -z "$INPUT_EMAIL" ]; then echo "::error::email is required"; exit 1; fi
+          if [ -z "$GOPAY_PHONE" ]; then echo "::error::GOPAY_PHONE secret missing"; exit 1; fi
+          if [ -z "$GOPAY_PIN" ]; then echo "::error::GOPAY_PIN secret missing"; exit 1; fi
+          if [ -z "$OTP_RELAY_URL" ]; then echo "::error::OTP_RELAY_URL secret missing"; exit 1; fi
+          if [ -z "$GOPAY_OTP_TOKEN" ]; then echo "::error::GOPAY_OTP_TOKEN secret missing"; exit 1; fi
+          xvfb-run --auto-servernum --server-args='-screen 0 1366x900x24' \
+            python bot/chatgpt_revoke.py \
+              --autorevoke \
+              --email "$INPUT_EMAIL" \
+              --phone "$GOPAY_PHONE" \
+              --pin "$GOPAY_PIN" \
+              --otp-url "$OTP_RELAY_URL" \
+              --otp-token "$GOPAY_OTP_TOKEN" \
+              --otp-timeout 300 \
+              --timeout 60

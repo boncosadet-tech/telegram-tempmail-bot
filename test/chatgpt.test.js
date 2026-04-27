@@ -2,16 +2,21 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  AUTOREVOKE_HELP_TEXT,
   CHATGPT_HELP_TEXT,
   CLAIM_HELP_TEXT,
   CREATEGPT_HELP_TEXT,
   CREATEGPT_MAX_BATCH,
+  REVOKE_HELP_TEXT,
   isValidAlias,
   parseChatgptArgs,
   parseClaimEmail,
   parseCreategptCount,
+  parseRevokeEmail,
+  triggerChatgptAutorevoke,
   triggerChatgptBatch,
   triggerChatgptClaim,
+  triggerChatgptRevoke,
   triggerChatgptSignup
 } from "../src/worker/chatgpt.js";
 
@@ -198,4 +203,79 @@ test("triggerChatgptClaim fails fast without GITHUB_PAT", async () => {
 test("CLAIM_HELP_TEXT mentions /claim and OTP relay", () => {
   assert.match(CLAIM_HELP_TEXT, /\/claim/);
   assert.match(CLAIM_HELP_TEXT, /otp/i);
+});
+
+test("parseRevokeEmail is an alias for parseClaimEmail", () => {
+  assert.equal(parseRevokeEmail("USER@example.com"), "user@example.com");
+  assert.equal(parseRevokeEmail("not-an-email"), "");
+  assert.equal(parseRevokeEmail(""), "");
+});
+
+test("triggerChatgptRevoke dispatches chatgpt-revoke event", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url, init });
+    return new Response("", { status: 200 });
+  };
+  try {
+    const env = { GITHUB_PAT: "secret", GITHUB_REPO: "owner/repo" };
+    const result = await triggerChatgptRevoke(env, 5555, "x@y.co");
+    assert.equal(result.ok, true);
+    assert.equal(calls.length, 1);
+    const body = JSON.parse(calls[0].init.body);
+    assert.equal(body.event_type, "chatgpt-revoke");
+    assert.equal(body.client_payload.email, "x@y.co");
+    assert.equal(body.client_payload.chat_id, "5555");
+  } finally {
+    delete globalThis.fetch;
+  }
+});
+
+test("triggerChatgptRevoke propagates GitHub error", async () => {
+  globalThis.fetch = async () => new Response("not found", { status: 404 });
+  try {
+    const env = { GITHUB_PAT: "secret" };
+    const result = await triggerChatgptRevoke(env, 1, "x@y.z");
+    assert.equal(result.ok, false);
+    assert.match(result.error, /404/);
+  } finally {
+    delete globalThis.fetch;
+  }
+});
+
+test("triggerChatgptRevoke fails fast without GITHUB_PAT", async () => {
+  const result = await triggerChatgptRevoke({}, 1, "x@y.z");
+  assert.equal(result.ok, false);
+  assert.match(result.error, /GITHUB_PAT/);
+});
+
+test("triggerChatgptAutorevoke dispatches chatgpt-autorevoke event", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url, init });
+    return new Response("", { status: 200 });
+  };
+  try {
+    const env = { GITHUB_PAT: "secret", GITHUB_REPO: "owner/repo" };
+    const result = await triggerChatgptAutorevoke(env, 7, "w@x.co");
+    assert.equal(result.ok, true);
+    const body = JSON.parse(calls[0].init.body);
+    assert.equal(body.event_type, "chatgpt-autorevoke");
+    assert.equal(body.client_payload.email, "w@x.co");
+    assert.equal(body.client_payload.chat_id, "7");
+  } finally {
+    delete globalThis.fetch;
+  }
+});
+
+test("REVOKE_HELP_TEXT mentions Stripe and cancellation", () => {
+  assert.match(REVOKE_HELP_TEXT, /\/revoke/);
+  assert.match(REVOKE_HELP_TEXT, /Stripe/i);
+  assert.match(REVOKE_HELP_TEXT, /[Cc]ancel/);
+});
+
+test("AUTOREVOKE_HELP_TEXT mentions both phases", () => {
+  assert.match(AUTOREVOKE_HELP_TEXT, /\/autorevoke/);
+  assert.match(AUTOREVOKE_HELP_TEXT, /claim/i);
+  assert.match(AUTOREVOKE_HELP_TEXT, /cancel/i);
 });

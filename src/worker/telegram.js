@@ -17,15 +17,20 @@ import { issueLoginToken } from "./auth.js";
 import { safeEqual } from "./utils.js";
 import {
   CHATGPT_HELP_TEXT,
+  AUTOREVOKE_HELP_TEXT,
   CLAIM_HELP_TEXT,
   CREATEGPT_HELP_TEXT,
   CREATEGPT_MAX_BATCH,
+  REVOKE_HELP_TEXT,
   isValidAlias,
   parseChatgptArgs,
   parseClaimEmail,
   parseCreategptCount,
+  parseRevokeEmail,
+  triggerChatgptAutorevoke,
   triggerChatgptBatch,
   triggerChatgptClaim,
+  triggerChatgptRevoke,
   triggerChatgptSignup
 } from "./chatgpt.js";
 import { maskOtp, parseOtpArg, setPendingGopayOtp } from "./otp_relay.js";
@@ -164,7 +169,9 @@ function helpText(domain, domains) {
     "/chatgpt aisha.putra - alias custom",
     "/creategpt 5 - buat 5 akun ChatGPT sekaligus (max 10)",
     "/claim <email> - claim free trial GoPay untuk 1 akun",
-    "/otp 123456 - relay OTP GoPay ke claim-trial worker",
+    "/revoke <email> - cancel ChatGPT Plus (stop next billing)",
+    "/autorevoke <email> - claim + auto-cancel dalam 1 run",
+    "/otp 123456 - relay OTP manual (fallback; auto lewat wa-otp-listener)",
     "/web - login dashboard",
     "/status - status runtime",
     "/whoami - tampilkan Telegram ID",
@@ -468,6 +475,58 @@ export async function handleTelegram(request, env) {
       env,
       replyChatId,
       `🚀 Workflow di-trigger di ${dispatch.repo}. Tunggu prompt OTP via WhatsApp lalu balas dengan /otp 123456.`
+    );
+  } else if (text.startsWith("/autorevoke")) {
+    const body = text.replace(/^\/autorevoke(?:@\S+)?/, "").trim();
+    if (!body || body === "help" || body === "-h" || body === "--help") {
+      await sendTelegram(env, replyChatId, AUTOREVOKE_HELP_TEXT);
+      return new Response("ok", { status: 200 });
+    }
+    const email = parseRevokeEmail(body);
+    if (!email) {
+      await sendTelegram(
+        env,
+        replyChatId,
+        "Format: /autorevoke <email>\nContoh: /autorevoke adit.brooks@areyoustudent.me"
+      );
+      return new Response("ok", { status: 200 });
+    }
+    await sendTelegram(env, replyChatId, `⏳ Memulai claim + auto-cancel untuk ${email}`);
+    const dispatch = await triggerChatgptAutorevoke(env, replyChatId, email);
+    if (!dispatch.ok) {
+      await sendTelegram(env, replyChatId, `❌ Gagal trigger workflow: ${dispatch.error}`);
+      return new Response("ok", { status: 200 });
+    }
+    await sendTelegram(
+      env,
+      replyChatId,
+      `🚀 Workflow di-trigger di ${dispatch.repo}. Listener WA akan inject OTP otomatis. Cancel plan akan jalan setelah trial aktif.`
+    );
+  } else if (text.startsWith("/revoke")) {
+    const body = text.replace(/^\/revoke(?:@\S+)?/, "").trim();
+    if (!body || body === "help" || body === "-h" || body === "--help") {
+      await sendTelegram(env, replyChatId, REVOKE_HELP_TEXT);
+      return new Response("ok", { status: 200 });
+    }
+    const email = parseRevokeEmail(body);
+    if (!email) {
+      await sendTelegram(
+        env,
+        replyChatId,
+        "Format: /revoke <email>\nContoh: /revoke adit.brooks@areyoustudent.me"
+      );
+      return new Response("ok", { status: 200 });
+    }
+    await sendTelegram(env, replyChatId, `⏳ Membuka Stripe portal untuk ${email}`);
+    const dispatch = await triggerChatgptRevoke(env, replyChatId, email);
+    if (!dispatch.ok) {
+      await sendTelegram(env, replyChatId, `❌ Gagal trigger workflow: ${dispatch.error}`);
+      return new Response("ok", { status: 200 });
+    }
+    await sendTelegram(
+      env,
+      replyChatId,
+      `🚀 Workflow di-trigger di ${dispatch.repo}. ~1 menit lagi Anda akan dapat status Cancel plan.`
     );
   } else if (text.startsWith("/otp")) {
     if (!env.GOPAY_OTP_TOKEN) {

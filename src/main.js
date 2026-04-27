@@ -30,7 +30,7 @@ import {
   renderEmailHtml
 } from "./worker/email.js";
 import { handleTelegram, sendTelegram } from "./worker/telegram.js";
-import { handleGopayOtpRelay } from "./worker/otp_relay.js";
+import { handleGopayOtpIngest, handleGopayOtpRelay } from "./worker/otp_relay.js";
 import { nowMs, redirect, waitUntilOrRun } from "./worker/utils.js";
 
 export const VERSION = "2026-04-19-telegram-tempmail-v4";
@@ -163,6 +163,7 @@ export default {
     if (pathname === "/logout" && request.method === "POST") return handleLogout();
     if (pathname.startsWith("/api/")) return handleApi(request, env);
     if (pathname === "/relay/gopay-otp") return handleGopayOtpRelay(request, env);
+    if (pathname === "/relay/gopay-otp/ingest") return handleGopayOtpIngest(request, env);
     if (pathname === `/tg/${env.WEBHOOK_SECRET}`) return handleTelegram(request, env);
 
     return new Response("not found", { status: 404 });

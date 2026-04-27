@@ -1,0 +1,20 @@
+{
+  "name": "wa-otp-listener",
+  "version": "0.1.0",
+  "private": true,
+  "description": "WhatsApp listener (Baileys) that forwards GoPay/Midtrans OTP messages to the telegram-tempmail Worker relay endpoint.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "pair": "node src/pair.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.9",
+    "pino": "^9.5.0",
+    "qrcode-terminal": "^0.12.0"
+  }
+}
