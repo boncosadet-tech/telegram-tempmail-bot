@@ -11,14 +11,16 @@
 //     graceful SIGTERM, non-zero exit on fatal pairing errors so
 //     systemd can surface them.
 
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFile } from "node:fs";
 import process from "node:process";
 import pino from "pino";
 import qrcode from "qrcode-terminal";
+import QRCode from "qrcode";
 import {
   Browsers,
   DisconnectReason,
-  default as makeWASocket,
+  fetchLatestBaileysVersion,
+  makeWASocket,
   useMultiFileAuthState
 } from "@whiskeysockets/baileys";
 
@@ -50,13 +52,26 @@ mkdirSync(config.authDir, { recursive: true });
 async function start() {
   const { state, saveCreds } = await useMultiFileAuthState(config.authDir);
 
+  // Fetch the latest WA web protocol version so WhatsApp does not hard-close
+  // the socket with 405 (stale client version). Falls back silently on
+  // network errors — Baileys will use a bundled default.
+  let version;
+  try {
+    const latest = await fetchLatestBaileysVersion();
+    version = latest?.version;
+    logger.info({ version, isLatest: latest?.isLatest }, "resolved baileys version");
+  } catch (err) {
+    logger.warn({ err: err?.message }, "fetchLatestBaileysVersion failed — using default");
+  }
+
   const sock = makeWASocket({
     auth: state,
     logger: baileysLogger,
     browser: Browsers.appropriate("WA-OTP-Listener"),
     printQRInTerminal: false,
     syncFullHistory: false,
-    markOnlineOnConnect: false
+    markOnlineOnConnect: false,
+    ...(version ? { version } : {})
   });
 
   let pairingCodePrinted = false;
@@ -87,6 +102,21 @@ async function start() {
     if (qr && config.pairMode === "qr" && !sock.authState.creds.registered) {
       logger.info("scan QR on your phone: WhatsApp ▸ Linked Devices ▸ Link a device");
       qrcode.generate(qr, { small: true });
+      // Optional: dump QR as a PNG so headless/VM operators can open it in
+      // a browser. Controlled by env var so it is off by default.
+      const pngPath = process.env.WA_QR_PNG_PATH;
+      if (pngPath) {
+        QRCode.toFile(pngPath, qr, { width: 480, margin: 2 }, (err) => {
+          if (err) {
+            logger.warn({ err: err?.message, pngPath }, "failed to write QR PNG");
+          } else {
+            logger.info({ pngPath }, "QR PNG written");
+            // Touch a sibling flag file so external watchers can detect
+            // a fresh QR without relying on mtime races.
+            writeFile(`${pngPath}.ts`, String(Date.now()), () => {});
+          }
+        });
+      }
     }
     if (connection === "open") {
       logger.info(

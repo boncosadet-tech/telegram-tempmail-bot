@@ -57,6 +57,7 @@ Edit `~/.wa-otp-listener/env`:
 | `WA_MIN_BODY_LENGTH`  | ⬜       | Ignore messages shorter than this (default: 6).                         |
 | `WA_PAIR_MODE`        | ⬜       | `qr` (default) or `code` (8-digit pair-code flow).                      |
 | `WA_PAIR_PHONE`       | ⬜       | Required when `WA_PAIR_MODE=code`. Digits only, e.g. `628123456789`.    |
+| `WA_QR_PNG_PATH`      | ⬜       | Write the current pairing QR as a PNG to this path (headless-friendly). A sibling `.ts` flag file updates per QR for cache-busting. |
 | `LOG_LEVEL`           | ⬜       | `debug` / `info` / `warn` / `error`. Default `info`.                    |
 
 ## Pair the phone

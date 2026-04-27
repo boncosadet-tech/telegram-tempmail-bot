@@ -14,7 +14,8 @@ import process from "node:process";
 import pino from "pino";
 import {
   Browsers,
-  default as makeWASocket,
+  fetchLatestBaileysVersion,
+  makeWASocket,
   useMultiFileAuthState
 } from "@whiskeysockets/baileys";
 
@@ -42,35 +43,70 @@ async function main() {
     process.exit(0);
   }
 
+  let version;
+  try {
+    const latest = await fetchLatestBaileysVersion();
+    version = latest?.version;
+  } catch {
+    // fall through to Baileys default
+  }
+
   const sock = makeWASocket({
     auth: state,
     logger: logger.child({ component: "baileys" }),
     browser: Browsers.appropriate("WA-OTP-Listener"),
-    printQRInTerminal: false
+    printQRInTerminal: false,
+    ...(version ? { version } : {})
   });
 
   sock.ev.on("creds.update", saveCreds);
 
-  try {
-    const code = await sock.requestPairingCode(argPhone);
-    logger.info({ phone: argPhone, code }, "PAIR CODE ISSUED");
-    // Keep the socket up long enough for the phone to consume the code.
-    // We exit once the connection is fully established.
-    await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("pair timeout after 180s")), 180_000);
-      sock.ev.on("connection.update", (update) => {
-        if (update.connection === "open") {
-          clearTimeout(timer);
-          resolve();
-        }
-      });
-    });
-    logger.info("pairing completed — credentials saved");
-    process.exit(0);
-  } catch (err) {
-    logger.error({ err: err?.message }, "pair-code flow failed");
-    process.exit(1);
+  // Wait until Baileys is actually connecting before requesting the pair
+  // code. Calling requestPairingCode before the socket is ready returns
+  // "Connection Closed".
+  let codeRequested = false;
+  async function requestCodeOnce() {
+    if (codeRequested) return;
+    codeRequested = true;
+    try {
+      const code = await sock.requestPairingCode(argPhone);
+      // Pretty-print with a dash after 4 digits (matches WA UI).
+      const pretty = code.length === 8 ? `${code.slice(0, 4)}-${code.slice(4)}` : code;
+      logger.info({ phone: argPhone, code: pretty }, "PAIR CODE ISSUED");
+    } catch (err) {
+      logger.error({ err: err?.message }, "requestPairingCode failed");
+      process.exit(1);
+    }
   }
+
+  const overallTimeout = setTimeout(() => {
+    logger.error("pair timeout after 240s");
+    process.exit(1);
+  }, 240_000);
+
+  sock.ev.on("connection.update", (update) => {
+    const { connection, qr } = update;
+    if (qr && !codeRequested) {
+      // Baileys emits `qr` once the socket is ready — this is our cue
+      // that we can safely request a pair-code. We do NOT render the QR.
+      requestCodeOnce();
+    }
+    if (connection === "open") {
+      clearTimeout(overallTimeout);
+      logger.info("pairing completed — credentials saved");
+      process.exit(0);
+    }
+    if (connection === "close") {
+      logger.warn(
+        { reason: update?.lastDisconnect?.error?.message },
+        "connection closed while waiting for pair"
+      );
+      // Keep looping until pair or overall timeout.
+    }
+  });
 }
 
-main();
+main().catch((err) => {
+  console.error("pair: fatal:", err?.message || err);
+  process.exit(1);
+});
